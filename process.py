@@ -3,58 +3,39 @@ import re
 import requests
 import datetime
 import pandas as pd
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 
-CLIENT_TABLE_PATH = "clients.xlsx"  # נמצא בתיקייה הראשית של הפרויקט ב-Render
-
-app = FastAPI()
-
-
-class InvoiceRequest(BaseModel):
-    file_url: str
-    template_path: str
-    client_id: str
-
+CLIENT_TABLE_PATH = "clients.xlsx"  # שמור בתיקיית הפרויקט
 
 def extract_field(pattern, text, default=""):
     match = re.search(pattern, text, re.IGNORECASE)
     return match.group(1).strip() if match else default
 
-
 def translate(text):
     return text  # placeholder
-
 
 def get_exchange_rate(date_str, currency):
     try:
         date = datetime.datetime.strptime(date_str, "%d.%m.%Y").date()
-        # TODO: Implement real exchange rate logic
-        return 1.95583  # Fixed BGN rate for EUR
+        return 1.95583  # לשלב ראשון קבוע
     except:
         return 1.95583
 
-
-@app.post("/process-invoice")
-def process_invoice_api(request: InvoiceRequest):
+def process_invoice(file_url, template_path, client_id):
     try:
         invoice_path = "/tmp/invoice.pdf"
         tpl_path = "/tmp/template.docx"
-
         with open(invoice_path, 'wb') as f:
-            f.write(requests.get(request.file_url).content)
-
+            f.write(requests.get(file_url).content)
         with open(tpl_path, 'wb') as f:
-            f.write(requests.get(request.template_path).content)
+            f.write(requests.get(template_path).content)
 
         reader = PdfReader(invoice_path)
         text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
         clients = pd.read_excel(CLIENT_TABLE_PATH)
-        client_row = clients[clients["Company ID"] == int(request.client_id)]
+        client_row = clients[clients["Company ID"] == int(client_id)]
         if client_row.empty:
             return {"success": False, "error": "Client not found"}
 
@@ -80,27 +61,11 @@ def process_invoice_api(request: InvoiceRequest):
             "BankName": client_row["Bank name"].values[0],
         }
 
-        output_name = f"bulgarian_invoice_{invoice_number}.docx"
-        output_path = f"/tmp/{output_name}"
-
+        save_path = f"/tmp/bulgarian_invoice_{invoice_number}.docx"
         doc = DocxTemplate(tpl_path)
         doc.render(data)
-        doc.save(output_path)
+        doc.save(save_path)
 
-        return {
-            "success": True,
-            "invoice_number": invoice_number,
-            "file_path": f"/tmp/{output_name}",
-            "download_url": f"/download/{output_name}"
-        }
-
+        return {"success": True, "invoice_number": invoice_number, "file_path": save_path}
     except Exception as e:
         return {"success": False, "error": str(e)}
-
-
-@app.get("/download/{filename}")
-def download_file(filename: str):
-    file_path = f"/tmp/{filename}"
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename=filename)

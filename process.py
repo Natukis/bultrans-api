@@ -1,4 +1,3 @@
-
 import os
 import re
 import requests
@@ -22,16 +21,18 @@ def get_exchange_rate(date_str, currency):
         response = requests.get("https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml")
         if response.ok:
             return 1.95583  # placeholder rate
-    except:
-        pass
+    except Exception as e:
+        print("Exchange rate error:", e)
     return 1.95583
 
 def process_invoice(file_url, template_path, client_id):
     try:
         invoice_path = "/tmp/invoice.pdf"
         tpl_path = "/tmp/template.docx"
-        with open(invoice_path, 'wb') as f: f.write(requests.get(file_url).content)
-        with open(tpl_path, 'wb') as f: f.write(requests.get(template_path).content)
+        with open(invoice_path, 'wb') as f:
+            f.write(requests.get(file_url).content)
+        with open(tpl_path, 'wb') as f:
+            f.write(requests.get(template_path).content)
 
         reader = PdfReader(invoice_path)
         text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
@@ -45,7 +46,10 @@ def process_invoice(file_url, template_path, client_id):
         invoice_date = extract_field(r"Date:\s*([\d/\.]+)", text).replace("/", ".")
 
         match = re.search(r"Total Amount of Bill:\s*([A-Z]{3})\s*([\d\.,]+)", text)
-        currency, amount = (match.group(1), float(match.group(2).replace(',', ''))) if match else ("EUR", 0)
+        if match:
+            currency, amount = match.group(1), float(match.group(2).replace(',', ''))
+        else:
+            currency, amount = "EUR", 0
 
         exchange_rate = get_exchange_rate(invoice_date, currency)
         amount_bgn = round(amount * exchange_rate, 2)
@@ -68,4 +72,6 @@ def process_invoice(file_url, template_path, client_id):
         doc.render(data)
         doc.save(save_path)
 
-
+        return {"success": True, "invoice_number": invoice_number, "file_path": save_path}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

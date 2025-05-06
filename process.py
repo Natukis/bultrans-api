@@ -3,42 +3,58 @@ import re
 import requests
 import datetime
 import pandas as pd
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 
-CLIENT_TABLE_PATH = "clients.xlsx"
+CLIENT_TABLE_PATH = "clients.xlsx"  # נמצא בתיקייה הראשית של הפרויקט ב-Render
+
+app = FastAPI()
+
+
+class InvoiceRequest(BaseModel):
+    file_url: str
+    template_path: str
+    client_id: str
+
 
 def extract_field(pattern, text, default=""):
     match = re.search(pattern, text, re.IGNORECASE)
     return match.group(1).strip() if match else default
 
+
 def translate(text):
-    return text  # placeholder for now
+    return text  # placeholder
+
 
 def get_exchange_rate(date_str, currency):
     try:
         date = datetime.datetime.strptime(date_str, "%d.%m.%Y").date()
-        response = requests.get("https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml")
-        if response.ok:
-            return 1.95583  # placeholder rate
-    except Exception as e:
-        print("Exchange rate error:", e)
-    return 1.95583
+        # TODO: Implement real exchange rate logic
+        return 1.95583  # Fixed BGN rate for EUR
+    except:
+        return 1.95583
 
-def process_invoice(file_url, template_path, client_id):
+
+@app.post("/process-invoice")
+def process_invoice_api(request: InvoiceRequest):
     try:
         invoice_path = "/tmp/invoice.pdf"
         tpl_path = "/tmp/template.docx"
+
         with open(invoice_path, 'wb') as f:
-            f.write(requests.get(file_url).content)
+            f.write(requests.get(request.file_url).content)
+
         with open(tpl_path, 'wb') as f:
-            f.write(requests.get(template_path).content)
+            f.write(requests.get(request.template_path).content)
 
         reader = PdfReader(invoice_path)
         text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
         clients = pd.read_excel(CLIENT_TABLE_PATH)
-        client_row = clients[clients["Company ID"] == int(client_id)]
+        client_row = clients[clients["Company ID"] == int(request.client_id)]
         if client_row.empty:
             return {"success": False, "error": "Client not found"}
 
@@ -46,10 +62,7 @@ def process_invoice(file_url, template_path, client_id):
         invoice_date = extract_field(r"Date:\s*([\d/\.]+)", text).replace("/", ".")
 
         match = re.search(r"Total Amount of Bill:\s*([A-Z]{3})\s*([\d\.,]+)", text)
-        if match:
-            currency, amount = match.group(1), float(match.group(2).replace(',', ''))
-        else:
-            currency, amount = "EUR", 0
+        currency, amount = (match.group(1), float(match.group(2).replace(',', ''))) if match else ("EUR", 0)
 
         exchange_rate = get_exchange_rate(invoice_date, currency)
         amount_bgn = round(amount * exchange_rate, 2)
@@ -67,11 +80,27 @@ def process_invoice(file_url, template_path, client_id):
             "BankName": client_row["Bank name"].values[0],
         }
 
-        save_path = f"/tmp/bulgarian_invoice_{invoice_number}.docx"
+        output_name = f"bulgarian_invoice_{invoice_number}.docx"
+        output_path = f"/tmp/{output_name}"
+
         doc = DocxTemplate(tpl_path)
         doc.render(data)
-        doc.save(save_path)
+        doc.save(output_path)
 
-        return {"success": True, "invoice_number": invoice_number, "file_path": save_path}
+        return {
+            "success": True,
+            "invoice_number": invoice_number,
+            "file_path": f"/tmp/{output_name}",
+            "download_url": f"/download/{output_name}"
+        }
+
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@app.get("/download/{filename}")
+def download_file(filename: str):
+    file_path = f"/tmp/{filename}"
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename=filename)

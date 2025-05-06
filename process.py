@@ -67,8 +67,5 @@ def process_invoice(file_url, template_path, client_id):
         doc = DocxTemplate(tpl_path)
         doc.render(data)
         doc.save(save_path)
-openpyxl==3.1.2
 
-        return {"success": True, "invoice_number": invoice_number, "file_path": save_path}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+

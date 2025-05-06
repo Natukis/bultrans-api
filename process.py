@@ -7,7 +7,7 @@ import pandas as pd
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 
-CLIENT_TABLE_PATH = "/mnt/data/clients.xlsx"
+CLIENT_TABLE_PATH = "clients.xlsx"
 
 def extract_field(pattern, text, default=""):
     match = re.search(pattern, text, re.IGNORECASE)

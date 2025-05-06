@@ -1,16 +1,23 @@
-
+# main.py
 from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi.responses import FileResponse
 from process import process_invoice
 
 app = FastAPI()
 
-class InvoiceRequest(BaseModel):
-    file_url: str
-    template_path: str
-    client_id: str
-
 @app.post("/process-invoice")
-async def process_invoice_api(req: InvoiceRequest):
-    result = process_invoice(req.file_url, req.template_path, req.client_id)
-    return result
+def process_invoice_api(data: dict):
+    return process_invoice(
+        data["file_url"],
+        data["template_path"],
+        data["client_id"]
+    )
+
+@app.get("/download/{filename}")
+def download_file(filename: str):
+    file_path = f"/tmp/{filename}"
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    )

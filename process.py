@@ -8,7 +8,7 @@ from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 
 UPLOAD_DIR = "/tmp/uploads"
-CLIENT_TABLE_PATH = "/etc/secrets/clients.xlsx"  # אתה יכול לשנות את הנתיב לפי המיקום האמיתי
+CLIENT_TABLE_PATH = "/etc/secrets/clients.xlsx"
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -17,32 +17,29 @@ def extract_field(pattern, text, default=""):
     return match.group(1).strip() if match else default
 
 def translate(text):
-    return text  # תרגום עדיין לא מופעל – אפשר להוסיף API מאוחר יותר
+    return text
 
 def get_exchange_rate(date_str, currency):
     try:
-        return 1.95583  # שער קבוע לבינתיים
+        return 1.95583  # קבוע לבינתיים
     except:
         return 1.95583
 
-async def process_invoice_upload(client_id: int, file: UploadFile, template: UploadFile):
+async def process_invoice(client_id: str, file: UploadFile, template: UploadFile):
     try:
         invoice_path = os.path.join(UPLOAD_DIR, file.filename)
         template_path = os.path.join(UPLOAD_DIR, template.filename)
 
-        # שמירה זמנית של הקבצים
         with open(invoice_path, "wb") as f:
             f.write(await file.read())
         with open(template_path, "wb") as f:
             f.write(await template.read())
 
-        # קריאת טקסט מהחשבונית
         reader = PdfReader(invoice_path)
         text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
-        # שליפת נתוני הלקוח
         clients = pd.read_excel(CLIENT_TABLE_PATH)
-        client_row = clients[clients["Company ID"] == client_id]
+        client_row = clients[clients["Company ID"] == int(client_id)]
         if client_row.empty:
             return JSONResponse(content={"success": False, "error": "Client not found"})
 
@@ -68,7 +65,6 @@ async def process_invoice_upload(client_id: int, file: UploadFile, template: Upl
             "BankName": client_row["Bank name"].values[0],
         }
 
-        # הפקת הקובץ
         save_path = f"/tmp/bulgarian_invoice_{invoice_number}.docx"
         doc = DocxTemplate(template_path)
         doc.render(data)

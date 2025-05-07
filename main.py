@@ -1,13 +1,14 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import JSONResponse
-from process import process_invoice_upload
+from fastapi import FastAPI
+from process import process_invoice
+from pydantic import BaseModel
 
 app = FastAPI()
 
-@app.post("/process-invoice-upload")
-async def handle_upload(
-    client_id: int = Form(...),
-    file: UploadFile = File(...),
-    template: UploadFile = File(...)
-):
-    return await process_invoice_upload(client_id, file, template)
+class InvoiceRequest(BaseModel):
+    file_url: str
+    template_path: str
+    client_id: str
+
+@app.post("/process-invoice")
+def generate_invoice(req: InvoiceRequest):
+    return process_invoice(req.file_url, req.template_path, req.client_id)

@@ -1,8 +1,8 @@
-fastapi
-uvicorn
-requests
-pandas
-openpyxl
-PyPDF2
-docxtpl
-python-multipart
+fastapi==0.110.0
+uvicorn==0.29.0
+requests==2.31.0
+pandas==2.0.3
+openpyxl==3.1.2
+PyPDF2==3.0.1
+docxtpl==0.16.7
+python-multipart==0.0.6

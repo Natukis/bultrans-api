@@ -6,10 +6,9 @@ from fastapi import UploadFile
 from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
-from docx import Document
 
 UPLOAD_DIR = "/tmp/uploads"
-CLIENT_TABLE_PATH = "/etc/secrets/clients.xlsx"
+CLIENT_TABLE_PATH = "clients.xlsx"  # ← נתיב יחסי מתוקן
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -18,11 +17,11 @@ def extract_field(pattern, text, default=""):
     return match.group(1).strip() if match else default
 
 def translate(text):
-    return text  # ניתן לשלב API בהמשך
+    return text  # אפשר לשלב תרגום בעתיד
 
 def get_exchange_rate(date_str, currency):
     try:
-        return 1.95583  # שער קבוע
+        return 1.95583  # שער קבוע זמני
     except:
         return 1.95583
 
@@ -36,18 +35,9 @@ async def process_invoice_upload(client_id: int, file: UploadFile, template: Upl
         with open(template_path, "wb") as f:
             f.write(await template.read())
 
-        # קריאת טקסט מתוך PDF או Word
-        text = ""
-        if invoice_path.lower().endswith(".pdf"):
-            reader = PdfReader(invoice_path)
-            text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-        elif invoice_path.lower().endswith(".docx"):
-            doc = Document(invoice_path)
-            text = "\n".join([p.text for p in doc.paragraphs])
-        else:
-            return JSONResponse(content={"success": False, "error": "Unsupported file type"})
+        reader = PdfReader(invoice_path)
+        text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
-        # שליפת מידע
         clients = pd.read_excel(CLIENT_TABLE_PATH)
         client_row = clients[clients["Company ID"] == client_id]
         if client_row.empty:
@@ -75,15 +65,15 @@ async def process_invoice_upload(client_id: int, file: UploadFile, template: Upl
             "BankName": client_row["Bank name"].values[0],
         }
 
-        output_path = f"/tmp/bulgarian_invoice_{invoice_number}.docx"
+        save_path = f"/tmp/bulgarian_invoice_{invoice_number}.docx"
         doc = DocxTemplate(template_path)
         doc.render(data)
-        doc.save(output_path)
+        doc.save(save_path)
 
         return JSONResponse(content={
             "success": True,
             "invoice_number": invoice_number,
-            "file_path": output_path
+            "file_path": save_path
         })
 
     except Exception as e:

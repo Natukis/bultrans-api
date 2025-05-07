@@ -1,5 +1,4 @@
 from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import JSONResponse
 from process import process_invoice_upload
 
 app = FastAPI()
@@ -11,7 +10,3 @@ async def generate_invoice(
     template: UploadFile = File(...)
 ):
     return await process_invoice_upload(client_id, file, template)
-
-@app.get("/")
-def read_root():
-    return {"status": "OK"}

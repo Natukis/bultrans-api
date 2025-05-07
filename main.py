@@ -10,3 +10,7 @@ async def generate_invoice(
     template: UploadFile = File(...)
 ):
     return await process_invoice_upload(client_id, file, template)
+
+@app.get("/")
+def root():
+    return {"status": "OK"}

@@ -1,27 +1,53 @@
+import os
+import re
+import datetime
+import pandas as pd
+from fastapi import UploadFile
+from fastapi.responses import JSONResponse
+from docxtpl import DocxTemplate
+from PyPDF2 import PdfReader
+from docx import Document
+
+UPLOAD_DIR = "/tmp/uploads"
+CLIENT_TABLE_PATH = "/etc/secrets/clients.xlsx"
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def extract_field(pattern, text, default=""):
+    match = re.search(pattern, text, re.IGNORECASE)
+    return match.group(1).strip() if match else default
+
+def translate(text):
+    return text  # ניתן לשלב API בהמשך
+
+def get_exchange_rate(date_str, currency):
+    try:
+        return 1.95583  # שער קבוע
+    except:
+        return 1.95583
+
 async def process_invoice_upload(client_id: int, file: UploadFile, template: UploadFile):
     try:
         invoice_path = os.path.join(UPLOAD_DIR, file.filename)
         template_path = os.path.join(UPLOAD_DIR, template.filename)
 
-        # שמירת הקבצים
         with open(invoice_path, "wb") as f:
             f.write(await file.read())
         with open(template_path, "wb") as f:
             f.write(await template.read())
 
-        # קריאת תוכן מהחשבונית (PDF או DOCX)
+        # קריאת טקסט מתוך PDF או Word
         text = ""
         if invoice_path.lower().endswith(".pdf"):
             reader = PdfReader(invoice_path)
             text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
         elif invoice_path.lower().endswith(".docx"):
-            from docx import Document
             doc = Document(invoice_path)
-            text = "\n".join([para.text for para in doc.paragraphs])
+            text = "\n".join([p.text for p in doc.paragraphs])
         else:
-            return JSONResponse(content={"success": False, "error": "Unsupported invoice file type"})
+            return JSONResponse(content={"success": False, "error": "Unsupported file type"})
 
-        # המשך טיפול רגיל
+        # שליפת מידע
         clients = pd.read_excel(CLIENT_TABLE_PATH)
         client_row = clients[clients["Company ID"] == client_id]
         if client_row.empty:

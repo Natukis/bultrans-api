@@ -1,7 +1,7 @@
+
 import os
 import re
 import datetime
-import base64
 import pandas as pd
 import requests
 import xml.etree.ElementTree as ET
@@ -11,7 +11,7 @@ from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 from num2words import num2words
 
-SUPPLIERS_PATH = "/tmp/suppliers.xlsx"
+SUPPLIERS_PATH = "suppliers.xlsx"  # now using project file directly
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 

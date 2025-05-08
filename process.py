@@ -10,8 +10,9 @@ from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 from num2words import num2words
+import traceback
 
-SUPPLIERS_PATH = "suppliers.xlsx"  # now using project file directly
+SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -20,7 +21,7 @@ def extract_field(pattern, text, default=""):
     return match.group(1).strip() if match else default
 
 def get_exchange_rate_fallback(date_str, currency):
-    return 1.95583  # fallback default
+    return 1.95583
 
 def get_exchange_rate_bnb(date: str, currency: str) -> float:
     try:
@@ -39,7 +40,7 @@ def get_exchange_rate_bnb(date: str, currency: str) -> float:
         raise Exception("Rate not found in XML")
 
     except Exception as e:
-        print(f"⚠️ BNB exchange fetch failed: {e}")
+        print("⚠️ BNB ERROR:", traceback.format_exc())
         return get_exchange_rate_fallback(date, currency)
 
 async def process_invoice_upload(supplier_id: int, file: UploadFile, template: UploadFile):
@@ -60,11 +61,11 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
                             "SupplierName", "SupplierCompanyVAT", "SupplierCity", "SupplierAddress", "SupplierContactPerson"]
         for col in required_columns:
             if col not in suppliers.columns:
-                return JSONResponse(content={"success": False, "error": f"Missing required column in suppliers file: {col}"})
+                raise ValueError(f"Missing required column in suppliers file: {col}")
 
         row = suppliers[suppliers["SupplierCompanyID"] == supplier_id]
         if row.empty:
-            return JSONResponse(content={"success": False, "error": "Supplier not found"})
+            raise ValueError("Supplier not found")
 
         invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
         invoice_date = extract_field(r"Date:\s*([\d/\.]+)", text).replace("/", ".")
@@ -125,4 +126,5 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
 
         return JSONResponse(content={"success": True, "invoice_number": invoice_number, "file_path": save_path})
     except Exception as e:
+        print("❌ INTERNAL ERROR:", traceback.format_exc())
         return JSONResponse(content={"success": False, "error": str(e)})

@@ -1,26 +1,29 @@
-# BulTrans Invoice Generator
+# BulTrans – Bulgarian Invoice Converter
 
-A FastAPI-based microservice that converts English-language invoices (PDF) into legally compliant Bulgarian Word-format invoices using a supplier database.
-
----
-
-## 🚀 Features
-
-- 🧾 Extracts invoice data from PDF
-- 🌍 Retrieves exchange rates from the Bulgarian National Bank (BNB)
-- 💬 Converts total amount into Bulgarian words
-- 🧠 Auto-fills a Word template with supplier and client data
-- ✅ No database required – works with `suppliers.xlsx`
+A FastAPI-based service that converts English PDF invoices into legally-compliant Bulgarian Word (.docx) invoices using a supplier database.
 
 ---
 
-## ⚙️ Requirements
+## ✅ Features
+
+- Extracts invoice data from unstructured PDF
+- Auto-detects customer name, ID, VAT, address, city
+- Parses total amount and VAT from any layout
+- Converts totals to Bulgarian words
+- Fetches exchange rates from BNB.bg or fallback
+- Outputs a ready-to-sign Bulgarian invoice (.docx)
+
+---
+
+## 📦 Requirements
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 🏁 Running locally
+---
+
+## 🚀 Run Locally
 
 ```bash
 uvicorn main:app --reload
@@ -33,27 +36,53 @@ uvicorn main:app --reload
 ### `POST /process-invoice/`
 
 **Form Data:**
-- `supplier_id` (int): ID from `suppliers.xlsx`
-- `file` (PDF): the English invoice file
-- `template` (DOCX): Word invoice template in Bulgarian format
+- `supplier_id` (int): Must match `SupplierCompanyID` from `suppliers.xlsx`
+- `file`: English invoice in PDF
+- `template`: Bulgarian Word invoice template (.docx)
 
 ---
 
-## ✅ Response (on success)
+### Example cURL
 
-```json
-{
-  "success": true,
-  "invoice_number": "0000001235",
-  "file_path": "/tmp/bulgarian_invoice_0000001235.docx"
-}
+```bash
+curl -X POST http://localhost:8000/process-invoice/ \
+  -F "supplier_id=206232541" \
+  -F "file=@Invoice.pdf" \
+  -F "template=@BulTrans_Template.docx"
 ```
 
 ---
 
-## 📁 Files in this project
+## 📥 Downloading the invoice
 
-- `main.py` – FastAPI app entry point
-- `process.py` – logic for parsing, translation, and document generation
-- `suppliers.xlsx` – table of suppliers with banking and contact info
-- `requirements.txt` – all needed packages
+Once created, the response contains:
+```json
+{
+  "success": true,
+  "invoice_number": "0000000002",
+  "file_path": "/tmp/bulgarian_invoice_0000000002.docx"
+}
+```
+
+You can then download it via:
+
+### `GET /download-invoice/{filename}`
+
+Example:
+```
+https://your-domain.com/download-invoice/bulgarian_invoice_0000000002.docx
+```
+
+---
+
+## 🧾 Files
+
+- `main.py`: FastAPI routes
+- `process.py`: Core invoice logic
+- `suppliers.xlsx`: Supplier data (bank details, VAT, contact)
+- `requirements.txt`: Dependencies
+- `README.md`: This file 😊
+
+---
+
+Made with ❤️ in Bulgaria 🇧🇬

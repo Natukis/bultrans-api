@@ -1,0 +1,59 @@
+# BulTrans Invoice Generator
+
+A FastAPI-based microservice that converts English-language invoices (PDF) into legally compliant Bulgarian Word-format invoices using a supplier database.
+
+---
+
+## 🚀 Features
+
+- 🧾 Extracts invoice data from PDF
+- 🌍 Retrieves exchange rates from the Bulgarian National Bank (BNB)
+- 💬 Converts total amount into Bulgarian words
+- 🧠 Auto-fills a Word template with supplier and client data
+- ✅ No database required – works with `suppliers.xlsx`
+
+---
+
+## ⚙️ Requirements
+
+```bash
+pip install -r requirements.txt
+```
+
+## 🏁 Running locally
+
+```bash
+uvicorn main:app --reload
+```
+
+---
+
+## 📬 API Endpoint
+
+### `POST /process-invoice/`
+
+**Form Data:**
+- `supplier_id` (int): ID from `suppliers.xlsx`
+- `file` (PDF): the English invoice file
+- `template` (DOCX): Word invoice template in Bulgarian format
+
+---
+
+## ✅ Response (on success)
+
+```json
+{
+  "success": true,
+  "invoice_number": "0000001235",
+  "file_path": "/tmp/bulgarian_invoice_0000001235.docx"
+}
+```
+
+---
+
+## 📁 Files in this project
+
+- `main.py` – FastAPI app entry point
+- `process.py` – logic for parsing, translation, and document generation
+- `suppliers.xlsx` – table of suppliers with banking and contact info
+- `requirements.txt` – all needed packages

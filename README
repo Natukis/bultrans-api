@@ -10,8 +10,8 @@ BulTrans is a FastAPI-based system that converts English PDF invoices into legal
 - Extracts customer name, VAT, company ID, address, city
 - Automatically translates fields like name, city, and address into Bulgarian
 - Detects total amount and VAT flexibly from different layouts
-- Converts total amount into Bulgarian words
-- Fetches currency exchange rate from BNB.bg based on invoice date
+- Converts total amount into Bulgarian words (internal logic)
+- Fetches currency exchange rate from BNB.bg based on invoice date, with fallback rates for common currencies
 - Inserts all values into a pre-defined Word template
 - Outputs a ready-to-sign Word invoice in Bulgarian format
 
@@ -77,9 +77,9 @@ bultrans/
 
 ## 💡 Notes
 
-- The system includes fallback exchange rate if BNB is not reachable.
+- If exchange rate is missing from BNB, fallback rates are used (USD, EUR, ILS, GBP).
 - Default service description is "Услуга по договор" if not found in the invoice.
-- All numeric values are formatted in Bulgarian (e.g., 5640 → "Пет хиляди шестстотин и четиридесет лева").
+- All numeric values are formatted in Bulgarian text (e.g., 5640 → "Пет хиляди шестстотин и четиридесет лева").
 
 ---
 

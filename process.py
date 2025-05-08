@@ -1,5 +1,4 @@
-# Write the full updated version of process.py with all the improvements
-process_code = """
+
 import os
 import re
 import datetime
@@ -44,7 +43,7 @@ def translate_text(text):
     return text
 
 def extract_customer_info(text):
-    lines = [line.strip() for line in text.split("\\n") if line.strip()]
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
     customer = {
         "RecipientName": "",
         "RecipientID": "",
@@ -59,9 +58,9 @@ def extract_customer_info(text):
             customer["RecipientName"] = translate_text(line.split(":")[-1].strip())
             for j in range(i + 1, min(i + 6, len(lines))):
                 if "ID" in lines[j]:
-                    customer["RecipientID"] = re.search(r"(\\d+)", lines[j]).group(1) if re.search(r"(\\d+)", lines[j]) else ""
+                    customer["RecipientID"] = re.search(r"(\d+)", lines[j]).group(1) if re.search(r"(\d+)", lines[j]) else ""
                 elif "VAT" in lines[j] or "ДДС" in lines[j]:
-                    vat = re.search(r"(BG\\d+)", lines[j])
+                    vat = re.search(r"(BG\d+)", lines[j])
                     customer["RecipientVAT"] = vat.group(1) if vat else ""
                 elif "Address" in lines[j] or "Адрес" in lines[j]:
                     customer["RecipientAddress"] = translate_text(lines[j].split(":")[-1].strip())
@@ -104,7 +103,7 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
             f.write(await template.read())
 
         reader = PdfReader(invoice_path)
-        text = "\\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+        text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
         suppliers = pd.read_excel(SUPPLIERS_PATH)
         row = suppliers[suppliers["SupplierCompanyID"] == supplier_id]
@@ -112,11 +111,11 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
             raise ValueError("Supplier not found")
 
         invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
-        date_match = re.search(r"(\\d{1,2}[./]\\d{1,2}[./]\\d{2,4})", text)
+        date_match = re.search(r"(\d{1,2}[./]\d{1,2}[./]\d{2,4})", text)
         invoice_date = date_match.group(1).replace("/", ".") if date_match else ""
         invoice_date_bnb = datetime.datetime.strptime(invoice_date, "%d.%m.%Y").strftime("%Y-%m-%d") if invoice_date else ""
 
-        total_match = re.search(r"Total Amount of Bill:.*?(\\d+[.,]\\d+)", text)
+        total_match = re.search(r"Total Amount of Bill:.*?(\d+[.,]\d+)", text)
         currency_match = re.search(r"(USD|EUR|BGN|ILS|GBP)", text)
         currency = currency_match.group(1) if currency_match else "BGN"
         amount = float(total_match.group(1).replace(",", "")) if total_match else 4.0
@@ -124,7 +123,7 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
         exchange_rate = get_exchange_rate_bnb(invoice_date_bnb, currency)
         amount_bgn = round(amount * exchange_rate, 2)
 
-        vat_match = re.search(r"VAT Amount:.*?(\\d+[.,]\\d+)", text)
+        vat_match = re.search(r"VAT Amount:.*?(\d+[.,]\d+)", text)
         vat_amount = float(vat_match.group(1).replace(",", "")) if vat_match else 0.0
         total_bgn = round(amount_bgn + vat_amount, 2)
 
@@ -169,7 +168,3 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
     except Exception as e:
         print("❌ INTERNAL ERROR:", traceback.format_exc())
         return JSONResponse(content={"success": False, "error": str(e)})
-"""
-
-with open(updated_process_path, "w", encoding="utf-8") as f:
-    f.write(process_code)

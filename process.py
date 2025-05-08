@@ -1,37 +1,46 @@
-
 import os
 import re
 import datetime
 import base64
 import pandas as pd
+import requests
+import xml.etree.ElementTree as ET
 from fastapi import UploadFile
 from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
-
-# Base64 encoded suppliers.xlsx
-SUPPLIERS_BASE64 = """UEsDBBQABgAIAAAAIQBBN4LPbgEAAAQFAAATAAgCW0NvbnRlbnRfVHlwZXNdLnhtbCCiBAIooAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACsVMluwjAQvVfqP0S+Vomhh6qqCBy6HFsk6AeYeJJYJLblGSj8fSdmUVWxCMElUWzPWybzPBit2iZZQkDjbC76WU8kYAunja1y8T39SJ9FgqSsVo2zkIs1oBgN7+8G07UHTLjaYi5qIv8iJRY1tAoz58HyTulCq4g/QyW9KuaqAvnY6z3JwlkCSyl1GGI4eINSLRpK3le8vFEyM1Ykr5tzHVUulPeNKRSxULm0+h9J6srSFKBdsWgZOkMfQGmsAahtMh8MM4YJELExFPIgZ4AGLyPdusq4MgrD2nh8YOtHGLqd4662dV/8O4LRkIxVoE/Vsne5auSPC/OZc/PsNMilrYktylpl7E73Cf54GGV89W8spPMXgc/oIJ4xkPF5vYQIc4YQad0A3rrtEfQcc60C6Anx9FY3F/AX+5QOjtQ4OI+c2gCXd2EXka469QwEgQzsQ3Jo2PaMHPmr2w7dnaJBH+CW8Q4b/gIAAP//AwBQSwMEFAAGAAgAAAAhALVVMCP0AAAATAIAAAsACAJfcmVscy8ucmVscyCiBAIooAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACskk1PwzAMhu9I/IfI99XdkBBCS3dBSLshVH6ASdwPtY2jJBvdvyccEFQagwNHf71+/Mrb3TyN6sgh9uI0rIsSFDsjtnethpf6cXUHKiZylkZxrOHEEXbV9dX2mUdKeSh2vY8qq7iooUvJ3yNG0/FEsRDPLlcaCROlHIYWPZmBWsZNWd5i+K4B1UJT7a2GsLc3oOqTz5t/15am6Q0/iDlM7NKZFchzYmfZrnzIbCH1+RpVU2g5abBinnI6InlfZGzA80SbvxP9fC1OnMhSIjQS+DLPR8cloPV/WrQ08cudecQ3CcOryPDJgosfqN4BAAD//wMAUEsDBBQABgAIAAAAIQCDiWSzawMAAEoIAAAPAAAAeGwvd29ya2Jvb2sueG1srFXdbqM4GL1fad4B+Z6C+UuCSkcQQFupHVWdTntTqXLBKVYBM8Y0qap5iZX2YqWV9rH6OvvZJGk7Wa0ynYmCwT8cn/N9xx+HH1dNbTxQ0TPeRggf2MigbcFL1t5F6MtFbk6R0UvSlqTmLY3QI+3Rx6MPvx0uubi/5fzeAIC2j1AlZRdaVl9UtCH9Ae9oCzMLLhoioSvurL4TlJR9Ralsasux7cBqCGvRiBCKfTD4YsEKmvJiaGgrRxBBayKBfl+xrt+gNcU+cA0R90NnFrzpAOKW1Uw+alBkNEV4fNdyQW5rkL3CvrES8A/gwjY0zmYnmNrZqmGF4D1fyAOAtkbSO/qxbWH8JgSr3Rjsh+RZgj4wlcMtKxG8k1WwxQpewLD902gYrKW9EkLw3onmb7k56OhwwWp6OVrXIF33iTQqUzUyatLLrGSSlhGaQJcv6ZsBMXTJwGqYdTzXdZB1tLXzmYAO5D6uJRUtkXTOWwlWW1P/WVtp7HnFwcTGOf06MEHh7ICFQA60pAjJbX9GZGUMoo7QPLz+0oPC67imq+uUL9uawxG6fuU9smv0H3AfKZR4CwSPpMbn78UDNxFuHHYmhQHPx+kJRPkzeYCYQ2bL9ZE8hqBi96YtRIhvnrBt27mf++Y8zx3Ti/OJOYu9zAySJM7jzPGDNPgGYkQQFpwMslqnU0FHyIPc7UydktVmBtvhwMoXGk+wm/6Zqv2u2cx9U4JV4bpkdNm/JF51jdUVa0u+jJCJbSh8j2+7Sz15xUpZgXNcYI+Mcex3yu4qYIwdTw2CwRWzCD352RTPkklu4hxke2kWmLGXxGYcuG48yzx34qaakfWKki6RQE3fjVbb+vmP57+e/4brz+d/MJRkVUV1rJEhQrWVOC6xzuXm7YLUxZkw1E0vnGHbmakVdCVPeqnv4DIGLLFnxxN75pl25vqmN5055tRzHXPupU7mT7I0S3yVJlXpw19R77TZw80nRLGsiJAXghT38OE5p4uE9OCrURDwfU028aeJ7QJFL8e56eGZbSZJ4Jl+mrv+BKfzzM9fyCr5i3dWm6ml36ZEDnBM1QnV/VC1+Xp0O7gYB9bpenMEw/NUxX399v8t/Azqa7rn4vxyz4XzT6cXp3uuPckubq5ybaT/VGvpbKhWe8ja5PDoXwAAAP//AwBQSwMEFAAGAAgAAAAhAIE+lJfzAAAAugIAABoACAF4bC9fcmVscy93b3JrYm9vay54bWwucmVscyCiBAEooAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKxSTUvEMBC9C/6HMHebdhUR2XQvIuxV6w8IybQp2yYhM3703xsqul1Y1ksvA2+Gee/Nx3b3NQ7iAxP1wSuoihIEehNs7zsFb83zzQMIYu2tHoJHBRMS7Orrq+0LDppzE7k+ksgsnhQ45vgoJRmHo6YiRPS50oY0as4wdTJqc9Adyk1Z3su05ID6hFPsrYK0t7cgmilm5f+5Q9v2Bp+CeR/R8xkJSTwNeQDR6NQhK/jBRfYI8rz8Zk15zmvBo/oM5RyrSx6qNT18hnQgh8hHH38pknPlopm7Ve/hdEL7yim/2/Isy/TvZuTJx9XfAAAA//8DAFBLAwQUAAYACAAAACEAsQjv/EoFAAB7FAAAGAAAAHhsL3dvcmtzaGVldHMvc2hlZXQxLnhtbJyU247aMBCG7yv1HSzfk8QhR0RY0V2ibq+qHq+N44BFHFPbnFT13Ts5ARJSCyslGcfxfP/MeOLp01FWaM+1EarOMHE8jHjNVCHqVYa/f8tHCUbG0rqglap5hk/c4KfZ+3fTg9Ibs+bcIiDUJsNra7cT1zVszSU1jtryGr6USktq4VWvXLPVnBatk6xc3/MiV1JR444w0fcwVFkKxl8U20le2w6ieUUtxG/WYmsGmmT34CTVm912xJTcAmIpKmFPLRQjySavq1ppuqwg7yMJKENHDZcP93iQaedvlKRgWhlVWgfIbhfzbfqpm7qUnUm3+d+FIYGr+V40G3hB+W8LiYRnln+Bjd8Ii86wplx6shNFhn8nZJHnxPNHYZ6+jIIwiUbph9wfBUmePsfjxXy+WPzBs2khYIebrJDmZYbnZPKJRNidTdsG+iH4wVyNkaXLr7zizHIQIRg1/blUatMsfIUpD5CmXdAgKbNiz595VQE5gBb/1YkEjYB7VrgeD2p529GfNSp4SXeV/aIOH7lYrS3Ijp2kATBVwWp4IimavwqaiR67qERh1xn2QydJk2AchxgtubG5aLwxYjtjlfzZLSI9qoPAfrQQsIf+e/QwBPahhUDGPeQ6kn+oQ5ytI9jBMXZImvokeSCHqKeAHXKInftLEPfuYHv39FIBY0/NfwpFvLOgcLC1KYEdgkmdMI2jMPLvjyntKWAHCnmcQuDY7VoEBgPH+39p3LbT/gIAAP//AAAA//90l2tuIjEQhK+COMCCZwYIK0Da9SPgW6AoUn5lVwFlr79jeh7dVeYPCt9Ut6vbg9s53D7e3+/her+eDl9//i2+jku3XNz+Xj9v/V8/3Xp5OrwV+qvH9+Py1n//Pm0Pq+/TYfU2PPtdQh6Bk+LFKjwrdlYRWLG3isiKtVUkVjireK0oGis5VySwzqUigYVyRdJOC636Vk/9bmy/Fx99Ezv3o5s6XwTHZav633SwASJxj81p1u1m3e0acORHzbyNs6HHFgdR9J/TNjbQnMhJQJG0lXa/gW1+lccbtYaDd+XMazio91KxAcXkSpbZi9mAvrP6hX9swHY/tb88hvZvoP0iGdu/bdpm02H7R83cXCgqiMK0H5JETgJWkraCL788M72H39iZF3CwwoUlDfw+ciXLfGSY3nf1w6bgcqCsxhMGgUcQEEQESUA7JT0L6CZwwZCsgLHd97B2RhZsbCPwCAKCiCAJULYFKNsYkhUwtrd12wUb2wg8goAgIkgClG0ByjaGZAWM7V3ddsHGNgKPICCICJIAZVuAso0hWQFj+6Vuu2BjG4FHEBBEBEmAsi1A2caQrICxva/bLtjYRuARBAQRQRKgbAtQtjEkK2Bs91eV+r2lcGP8odTEEwlEIpE0EOV+IMo+RWVNbAHPLl7jVWI6DB0STyQQiUTSQHQBklkXgGtlnccWADeZ6eY4juK5ACTeIQlEIpE0EF2A5NEFYOas89gC4CYwFTDOs7kAJN4hCUQikTQQXYDk0QVg5qzz2AKejFNH85SIJxKIRCJpILoAmqoUlTWxBTwZrI4mKxFPJBCJRNJAdAE0Xykqa2ILeDJiHc1YIp5IIBKJpIHoAmjSUlTWRApYzf8J/gcAAP//AAAA//80jUEKwkAMRa8y5ABWERGl072LrnqCyKQzQZ2ENCJ4elthdv99eP/3iplGtMx1CU+aPcJ+d4ZgnEvLLvpvTxDu4i6vRoUwkW10hDCLeINu6LfdifytQVHJJv5ShAsEMabq6Cw1goq5Ifv6d+UUwW7pAKvcfcQeSyHy4QcAAP//AwBQSwMEFAAGAAgAAAAhAOZjsMPVBwAAHSIAABMAAAB4bC90aGVtZS90aGVtZTEueG1s7FpLbxy5Eb4HyH8g+j6e7p634PFintbakixYYwd7pGY407TYzQbJkTQIFgi8p1yCBNgNAgQBFrnkhSALZIEscsnP0A8wYCPZ/IgU2T3TTQ1nbfmBbAJJl27OV8Wvq4pV1WTf/egyZuicCEl50vWCO76HSDLlM5osut6TybjS9pBUOJlhxhPS9VZEeh/d++EP7uI9FZGYIJBP5B7uepFS6V61KqcwjOUdnpIEfptzEWMFt2JRnQl8AXpjVg19v1mNMU08lOAY1F799ur3V7+++iO6+vLqi6s/XP0cPZrP6ZR499YTjRjMliipB6ZMnOhpSC5dws7OAo2QKzlgAp1j1vVgzhm/mJBL5SGGpYIfup5v/rzqvbtVvJcLMbVDtiQ3Nn+5XC4wOwvNnGJxupnUH4XterDRbwBMbeNGbf2/0WcAeDqFJ824lHUGjabfDnNsCZRdOnR3WkHNxpf017Y4B51mP6xb+g0o01/ffsZxZzRsWHgDyvCNLXzPD/udmoU3oAzf3MLXR71WOLLwBhQxmpxto5utdruZozeQOWf7Tnin2fRbwxxeoCAaNtGlp5jzRO2KtRg/42IMAA1kWNEEqVVK5ngKEd1LFZdoSGXK8MpDKU64hGE/DAIIvbofbv6NxfEewSVpzQuYyK0hzQfJqaCp6noPQKtXgrz85psXz79+8fxvLz777MXzv6ADuohUpsqS28fJoiz37e9+8e/f/AT9669ffvv5F268LONf/fmnr/7+j+9SD0utMMXLX3716uuvXv7qZ//80+cO7T2BT8vwCY2JREfkAj3mMTygMYXNn5yKm0lMIkwtCRyBbofqkYos4NEKMxeuT2wTPhWQZVzA+8tnFteTSCwVdcz8MIot4CHnrM+F0wAP9VwlC0+WycI9uViWcY8xPnfNPcCJ5eDRMoX0Sl0qBxGxaB4znCi8IAlRSP/GzwhxPN0nlFp2PaRTwSWfK/QJRX1MnSaZ0FMrkAqhfRqDX1YuguBqyzaHT1GfM9dTD8m5jYRlgZmD/IQwy4z38VLh2KVygmNWNvgBVpGL5MlKTMu4kVTg6QVhHI1mREqXzCMBz1ty+kMMic3p9kO2im2kUPTMpfMAc15GDvnZIMJx6uRMk6iM/VieQYhidMyVC37I7RWi78EPONnp7qeUWO5+fSJ4AgmuTKkIEP3LUjh8eZ9wez2u2BwTV5bpidjKrj1BndHRXy6s0D4ghOELPCMEPfnYwaDPU8vmBekHEWSVfeIKrAfYjlV9nxBJkOlrtlPkAZVWyJ6QBd/B53B1LfGscBJjsUvzEXjdCt1TAYvR8ZyP2PSsDDyi0ApCvDiN8kiCjlJwj3ZpPY6wVbv0vXTH60pY/nuTNQbr8tlN1yXIkBvLQGJ/Y9tMMLMmKAJmgik6cKVbELHcX4joumrElk65ub1oCzdAY2T1OzFNXtf8HGEh+MV/p/f5YF2PW/G79Du78sr+tS5nF+5/sLcZ4mVyTKCcbCeu29bmtrXx/u9bm11r+bahuW1obhsa1yvYB2loih4G2ptiq8ds/MQ7933mlLETtWLkQJqtHwmvNbMxDJo9KbMxudkHTCO41M8DE1i4hcBGBgmufkRVdBLhFPaHArPjuZC56oVEKZewbWSGzd4quabbbD4t40M+y7Y7zf6Sn5lQYlWM+w3YeMrGYatKZehmKx/U/NbUDduF2WpdE9CyNyFRmswmUXOQaK0HX0NC75y9HxYdB4u2Vr921ZYpgNrGK/DejeBtves16hkj2JGDHn2m/ZS5eu1d7Zz36uldxmTlCICtxW1PdzTXnY+nny4LtTfwtEXCOCULK5uE8ZVp8GQEb8N5dJb33b8r4G7q607hUoueNsV6NRQ0Wu0P4WudRK7lBpaUMwVL0AWs8RAWnYemOO16c9g3hss4heCR+t0LswUcxEyVyFb826SWVEg1xDLKLG6yTuafmCoiEKNx19PPvwkHlpgkkpHrwNL9vpIL9YL7vpEDr9teJvM5maqy30sj2tLZLaT4LFk4fzXibw/WknwJ7j6JZhfolC3FYwwh1mgF2rszKuH4IMhcPaNwHrbJZEX8XatMefa3DrmKfIxZGuG8pJSzeQY3BWVDx9xtbFC6y58ZDLptwtOFrrDvXHZfX6u15Yr62CmKppVWdNl0Z9MPV+VLrIoqarHKcvf1nNtZJzsIVGeZePfaX6JWTGZR04y387BO2vmoTe09dgSl6tPcYbdNkXBa4m1LP8hdj1pdIdaNpQl8c4hePtvmp88geQzhFHHJstNulsCdaS3TY2F8e8pnq/ySySzRZD7XTWmWyh+TOaKzy64XujrH/PA47wZYAmjT88IK2wg6uz1bUBe7XDRbsBvhrI291q/awhuJ9THrRthsLbpoq8v1ibru1c3M2mHZU5s0bCwFV9tWhON/gaF1zg5zs9wLeeZS5Z02XKGloF3vx36jVx+EjUHFbzdGlXqt7lfajV6t0ms0asGoEfjDfvgp0FNRHDSyryDGcBrEVvm3EGZ863uIeH3gdWfK4yo3XzdUjffN9xBBaH0PkX3RgCb6IwcPHAm0wlFQD3vhoDIYBs1KPRw2K+1WrVcZhM1h2IOi3Rz3PvXQuQEH/eFwPG6EleYAcHW/16j0+rVBpdke9cNxMKoPfQDn5ecS3mJ0zs1tAZeG173/AAAA//8DAFBLAwQUAAYACAAAACEALX3nazoDAACRCgAADQAAAHhsL3N0eWxlcy54bWzMVttu2zgQfV+g/0DwXdElktY2JBVxHQMFusUCyQL7SkuUTZQXgaRTucX++w4pyVbQok2yAbYvFjkeHp6ZOUOyeNsLjh6oNkzJEsdXEUZU1qphcl/iv+63wQIjY4lsCFeSlvhEDX5bvfmtMPbE6d2BUosAQpoSH6ztVmFo6gMVxFypjkr4p1VaEAtTvQ9NpylpjFskeJhEUR4KwiQeEFaifgqIIPrTsQtqJTpi2Y5xZk8eCyNRr97vpdJkx4FqH6ekRn2c6wT1etrEW7/ZR7BaK6NaewW4oWpbVtNv6S7DZUjqCxIgvwwpzsIoeRR7r1+IlIaaPjBXPlwVrZLWoFodpYVijoaqMF/QA+FgiXFYFbXiSiMLVYIkeYskgg4eN51VBn0kWqvPzrclgvHT8F/iFx+INlBzj5dEqbP5io8AgkH+nTF0XMaPASDG+ZlZ4piBoSqghJZquYUJGsf3pw54SVDbAOP9fuK91+QUJ9lsQeg3rIqd0g2oe8pJCjsPpqrgtLVAVLP9wX2t6uB3p6wFBVRFw8heScJdKNOK+UroCmiAEtsDCHhKKpMN7WlT4twnJnRbjDs8yd9z8VSe5A6UJ8ZP8h+Ce/3Yhuz9r5SnQv7qaR61BB1RU87vnIb+bh+1bN8ieRRbYd+DjuA4dn00DaEXxuEgxWHiJDpHG7BnsDkI9PmwqG/P+M9dHcMhOa5GpOv4ae37cDxvXhFtQL/hbC8FnU49Mk3RZ026e9r709ClqW+fn4nkVWO5/kUyA3e+ZbW7FWrIG4X78Xu58roCJc3k+kisZ9khd4eU+KO77fksxN2Rccvkd4QKmE1/kX7kDm/rbm7fFOddoAMa2pIjt/fnP0t8Gf9BG3YUUKPR60/2oKyHKPFl/MEd8nHu9gA1fDBwKsMXHTUr8dfb9e/Lze02CRbRehGk1zQLltl6E2Tpu/Vms11GSfTun9n74T+8HvxzByQYpyvD4Y2hx2BH8ncXW4lnk4G+v96A9pz7MsmjmyyOgu11FAdpThbBIr/Ogm0WJ5s8Xd9m22zGPXvhKyMK43h4rzjy2coyQTmTU62mCs2tUCSY/iCIcKpEeHlLVv8CAAD//wMAUEsDBBQABgAIAAAAIQB05cm5awIAANgEAAAUAAAAeGwvc2hhcmVkU3RyaW5ncy54bWyMVE1P20AQvSPxH0Y+h3jjOCaukqCECoRUIaTQ3t1kS6zG69TroHLjU616KSC4oIqKHnqsAjTUDQT+wuw/6mzol+KgVpbt9c6beW/fk1yaex20YZ1H0g9F2chlmQFcNMKmL9bKxtPVhZmiATL2RNNrh4KXjQ0ujbnK9FRJyhioV8iy0YrjziPTlI0WDzyZDTtcUOVFGAVeTJ/Rmik7EfeassV5HLRNizHHDDxfGNAIuyIuG5ZjQFf4r7p8/vdGpST9SimuLNWqyyUzrpRM/X2/98Qjdl+sh36Dg+gGz3k0Dqkt2nmor9ar4OYZA8YsCwquDcWinYZaLF9g9qyVm1RyrLxVsCeU7HxtpbY069osx4qu4xQdlkLVu51O2+fRshfw8eG/avNh0PHExrPq6j8QS48fAlSbzYhL+XC/iL1GvEI5h+JBkB9vpM7viZdigvQa7c+HzdSR8DP21B4mgJ+wh+d0D/CGnsPxwXiqNjXsA/bVjnpLXZspbjK3tlhfSOmlUCft44EmIsIe4BGe4QngPh6liL8Q8e1IGmEBD9Q7vMZLLQAT9X5yz+GoPMReBlzG3NTMA0zwG3H31Rbg3QhMo//qUlt4SQQ9/ErqihmwZ9Q29qanqIPeeEWrQ5Kh6wlh9eriz4A+DtUbohhkAK+yOMgSfEx3StK52sHrLOBHUrOtz6ZVqT3AY7wgzoRiSfA72K4e9lMF2P8x+Axv1a62KgM528mniI+1B/tqc5QteZLQma7whmweqm3QmZ+Q/0O1pQVqJSNfyDst7ZSudGT3wepwKdo+DsihO+oauZ3qMenPVPkBAAD//wMAUEsDBBQABgAIAAAAIQA7bTJLwQAAAEIBAAAjAAAAeGwvd29ya3NoZWV0cy9fcmVscy9zaGVldDEueG1sLnJlbHOEj8GKwjAURfcD/kN4e5PWhQxDUzciuFXnA2L62gbbl5D3FP17sxxlwOXlcM/lNpv7PKkbZg6RLNS6AoXkYxdosPB72i2/QbE46twUCS08kGHTLr6aA05OSonHkFgVC7GFUST9GMN+xNmxjgmpkD7m2UmJeTDJ+Ysb0Kyqam3yXwe0L0617yzkfVeDOj1SWf7sjn0fPG6jv85I8s+ESTmQYD6iSDnIRe3ygGJB63f2nmt9DgSmbczL8/YJAAD//wMAUEsDBBQABgAIAAAAIQADdZUqQwEAAGQEAAAnAAAAeGwvcHJpbnRlclNldHRpbmdzL3ByaW50ZXJTZXR0aW5nczEuYmlu7FPBSsNAEH1JRCse7Af0IN4Fq2lL8SC1iRppumWTll5ju5XVsAlpClXx7jf4Y178Ei86GxUURHPXWWbn7czjLbs724HCNRwIzHGFLQyQQVIup0yG381YsVafcG9Zh4CBdTxs2JUpoU2MTZPi2LRo7sAuoVWWYrwTdTTJdXwhO/GCL9s4Xn+4jaoRWzUcPF4+/6Rf+VRcK7BW/re/dAMffVXmzFUiB354prlVasFbTIrRxDkaaGMPO2jSH5qgRcjGLmUbhNqoFyuN2oRa5BFmRbWBKfZxR4qeShf5kVQ4ZtwP2JB3XXA3cHo9DJXMxFwjlkmh8iiXicKA8ZB3vBBczJN4UeRYqkMdgygVWSBvBHpuGLocziKNxRJ91nfhnY6CPEpjqS7AZjN0kzjJ/GQq3lDp568Rc2Q7/nd3+AoAAP//AwBQSwMEFAAGAAgAAAAhAP1eCUhOAQAAZgIAABEACAFkb2NQcm9wcy9jb3JlLnhtbCCiBAEooAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIySXUvDMBiF7wX/Q8l9m3ajY4a2Azd25URwongXkndbsPkgyez2703bWTv0QshNck6enPOSYnGSdfQJ1gmtSpQlKYpAMc2F2pfoZbuO5yhynipOa62gRGdwaFHd3hTMEKYtPFltwHoBLgok5QgzJTp4bwjGjh1AUpcEhwriTltJfdjaPTaUfdA94EmazrAETzn1FLfA2AxEdEFyNiDN0dYdgDMMNUhQ3uEsyfCP14OV7s8LnTJySuHPJnS6xB2zOevFwX1yYjA2TZM00y5GyJ/ht83Dc1c1FqqdFQNUFZwRZoF6bavH0K0W0VIfQBV4JLRDrKnzmzDvnQB+f65WQtFoRY+8wL/FAO069GTgUUhF+g7fyut0udquUTVJJ3mchjXbZnOS3pE8f2/fvrrfpuwP5CXBf4jzlphnJJ2PiN+Aqst9/TOqLwAAAP//AwBQSwMEFAAGAAgAAAAhACkr2umcAQAAGAMAABAACAFkb2NQcm9wcy9hcHAueG1sIKIEASigAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAnJLBatwwEIbvhb6D0T0rb1pCWWSFsGnJoaULu0nPijxei8iS0UzMbh+j0EOh0Mfa1+nYJhtv2lMOgpn5h38+jaQud43POkjoYijEfJaLDIKNpQvbQtxuPp19EBmSCaXxMUAh9oDiUr99o1YptpDIAWZsEbAQNVG7kBJtDY3BGcuBlSqmxhCnaStjVTkL19E+NhBInuf5hYQdQSihPGuPhmJ0XHT0WtMy2p4P7zb7loG1umpb76whvqX+4myKGCvKPu4seCWnomK6NdjH5GivcyWnqVpb42HJxroyHkHJ54K6AdMvbWVcQq06WnRgKaYM3Xde27nI7g1Cj1OIziRnAjFW3zYmQ+xbpKS/xfSANQChktwwFodw2juN3Xs9Hxo4OG3sDUYQFk4RN4484NdqZRL9h3g+JR4YRt4R5/Dj8Ovwm8/Pw59x9BRzuDkPfDFiGZvWhD0Lx+izCw94227itSF42uppUa1rk6Dkhzhu/VhQN7zQ5HuTZW3CFsqnnn+F/g/cjR9dzy9m+bucn3dSU/L5S+u/AAAA//8DAFBLAQItABQABgAIAAAAIQBBN4LPbgEAAAQFAAATAAAAAAAAAAAAAAAAAAAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAi0AFAAGAAgAAAAhALVVMCP0AAAATAIAAAsAAAAAAAAAAAAAAAAApwMAAF9yZWxzLy5yZWxzUEsBAi0AFAAGAAgAAAAhAIOJZLNrAwAASggAAA8AAAAAAAAAAAAAAAAAzAYAAHhsL3dvcmtib29rLnhtbFBLAQItABQABgAIAAAAIQCBPpSX8wAAALoCAAAaAAAAAAAAAAAAAAAAAGQKAAB4bC9fcmVscy93b3JrYm9vay54bWwucmVsc1BLAQItABQABgAIAAAAIQCxCO/8SgUAAHsUAAAYAAAAAAAAAAAAAAAAAJcMAAB4bC93b3Jrc2hlZXRzL3NoZWV0MS54bWxQSwECLQAUAAYACAAAACEA5mOww9UHAAAdIgAAEwAAAAAAAAAAAAAAAAAXEgAAeGwvdGhlbWUvdGhlbWUxLnhtbFBLAQItABQABgAIAAAAIQAtfedrOgMAAJEKAAANAAAAAAAAAAAAAAAAAB0aAAB4bC9zdHlsZXMueG1sUEsBAi0AFAAGAAgAAAAhAHTlyblrAgAA2AQAABQAAAAAAAAAAAAAAAAAgh0AAHhsL3NoYXJlZFN0cmluZ3MueG1sUEsBAi0AFAAGAAgAAAAhADttMkvBAAAAQgEAACMAAAAAAAAAAAAAAAAAHyAAAHhsL3dvcmtzaGVldHMvX3JlbHMvc2hlZXQxLnhtbC5yZWxzUEsBAi0AFAAGAAgAAAAhAAN1lSpDAQAAZAQAACcAAAAAAAAAAAAAAAAAISEAAHhsL3ByaW50ZXJTZXR0aW5ncy9wcmludGVyU2V0dGluZ3MxLmJpblBLAQItABQABgAIAAAAIQD9XglITgEAAGYCAAARAAAAAAAAAAAAAAAAAKkiAABkb2NQcm9wcy9jb3JlLnhtbFBLAQItABQABgAIAAAAIQApK9rpnAEAABgDAAAQAAAAAAAAAAAAAAAAAC4lAABkb2NQcm9wcy9hcHAueG1sUEsFBgAAAAAMAAwAJgMAAAAoAAAAAA=="""
+from num2words import num2words
 
 SUPPLIERS_PATH = "/tmp/suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Save the suppliers file on deployment
-with open(SUPPLIERS_PATH, "wb") as f:
-    f.write(base64.b64decode(SUPPLIERS_BASE64))
-
 def extract_field(pattern, text, default=""):
     match = re.search(pattern, text, re.IGNORECASE)
     return match.group(1).strip() if match else default
 
-def translate(text):
-    return text  # Placeholder for translation logic
+def get_exchange_rate_fallback(date_str, currency):
+    return 1.95583  # fallback default
 
-def get_exchange_rate(date_str, currency):
+def get_exchange_rate_bnb(date: str, currency: str) -> float:
     try:
-        return 1.95583  # Placeholder rate
-    except:
-        return 1.95583
+        url = "https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml"
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            raise Exception("BNB fetch failed")
+
+        root = ET.fromstring(response.content)
+        for record in root.findall('ROW'):
+            record_date = record.find('DATE').text.strip()
+            code = record.find('CODE').text.strip()
+            rate = record.find('RATE').text.strip()
+            if record_date == date and code == currency:
+                return float(rate.replace(",", "."))
+        raise Exception("Rate not found in XML")
+
+    except Exception as e:
+        print(f"⚠️ BNB exchange fetch failed: {e}")
+        return get_exchange_rate_fallback(date, currency)
 
 async def process_invoice_upload(supplier_id: int, file: UploadFile, template: UploadFile):
     try:
@@ -47,18 +56,35 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
         text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
         suppliers = pd.read_excel(SUPPLIERS_PATH)
-        row = suppliers[suppliers["Company ID"] == supplier_id]
+        required_columns = ["SupplierCompanyID", "Last invoice number", "IBAN", "Bankname", "BankCode",
+                            "SupplierName", "SupplierCompanyVAT", "SupplierCity", "SupplierAddress", "SupplierContactPerson"]
+        for col in required_columns:
+            if col not in suppliers.columns:
+                return JSONResponse(content={"success": False, "error": f"Missing required column in suppliers file: {col}"})
+
+        row = suppliers[suppliers["SupplierCompanyID"] == supplier_id]
         if row.empty:
             return JSONResponse(content={"success": False, "error": "Supplier not found"})
 
         invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
         invoice_date = extract_field(r"Date:\s*([\d/\.]+)", text).replace("/", ".")
+        invoice_date_bnb = datetime.datetime.strptime(invoice_date, "%d.%m.%Y").strftime("%Y-%m-%d")
 
         match = re.search(r"Total Amount of Bill:\s*([A-Z]{3})\s*([\d\.,]+)", text)
         currency, amount = (match.group(1), float(match.group(2).replace(",", ""))) if match else ("EUR", 0)
 
-        exchange_rate = get_exchange_rate(invoice_date, currency)
+        exchange_rate = get_exchange_rate_bnb(invoice_date_bnb, currency)
         amount_bgn = round(amount * exchange_rate, 2)
+
+        vat_match = re.search(r"VAT\s+(\d+)%:\s*([\d\.,]+)", text)
+        if vat_match:
+            vat_amount = float(vat_match.group(2).replace(",", ""))
+            total_bgn = amount_bgn + vat_amount
+        else:
+            vat_amount = None
+            total_bgn = amount_bgn
+
+        total_in_words = num2words(total_bgn, lang='bg').capitalize()
 
         data = {
             "InvoiceNumber": invoice_number,
@@ -67,21 +93,29 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
             "CustomerVAT": extract_field(r"Customer VAT:\s*(.+)", text),
             "CustomerID": extract_field(r"Customer ID:\s*(.+)", text),
             "CustomerAddress": extract_field(r"Customer Address:\s*(.+)", text),
+            "RecipientCity": extract_field(r"Customer City:\s*(.+)", text),
+            "ServiceDescription": extract_field(r"Service Description:\s*(.+)", text),
             "Amount": amount,
-            "AmountBGN": amount_bgn,
-            "ExchangeRate": exchange_rate,
             "Currency": currency,
+            "ExchangeRate": exchange_rate,
+            "AmountBGN": amount_bgn,
+            "VATAmount": vat_amount if vat_amount else "",
+            "TotalBGN": total_bgn,
+            "TotalInWords": total_in_words,
+            "TransactionCountry": "България",
+            "TransactionBasis": "По сметка",
             "IBAN": row["IBAN"].values[0],
-            "BankName": row["Bank name"].values[0],
-            "SupplierName": row["Supplier Name"].values[0],
-            "SupplierVAT": row["Supplier VAT number"].values[0],
-            "SupplierID": row["Company ID"].values[0],
-            "SupplierCity": row["City"].values[0],
-            "SupplierAddress": row["Address"].values[0],
+            "BankName": row["Bankname"].values[0],
+            "BankCode": row["BankCode"].values[0],
+            "SupplierName": row["SupplierName"].values[0],
+            "SupplierCompanyVAT": row["SupplierCompanyVAT"].values[0],
+            "SupplierCompanyID": row["SupplierCompanyID"].values[0],
+            "SupplierCity": row["SupplierCity"].values[0],
+            "SupplierAddress": row["SupplierAddress"].values[0],
+            "SupplierContactPerson": row["SupplierContactPerson"].values[0],
+            "CompiledBy": row["SupplierContactPerson"].values[0],
             "Month": datetime.datetime.now().strftime("%B"),
-            "Year": datetime.datetime.now().year,
-            "VAT": row["VAT"].values[0],
-            "CompiledBy": "",  # Optional
+            "Year": datetime.datetime.now().year
         }
 
         save_path = f"/tmp/bulgarian_invoice_{invoice_number}.docx"

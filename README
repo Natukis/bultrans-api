@@ -1,23 +1,22 @@
 
-# BulTrans – Bulgarian Invoice Conversion System 🇧🇬
+# BulTrans – Bulgarian Invoice Converter 🇧🇬
 
-BulTrans is a FastAPI-based system that converts English PDF invoices into legally-compliant Bulgarian Word (.docx) format.
+A FastAPI-based service that converts English PDF invoices into legally-compliant Bulgarian Word (.docx) invoices using a supplier database and currency exchange from BNB.bg.
 
 ---
 
 ## ✅ Features
 
-- Extracts customer name, VAT, company ID, address, city
-- Automatically translates fields like name, city, and address into Bulgarian
-- Detects total amount and VAT flexibly from different layouts
-- Converts total amount into Bulgarian words (internal logic)
-- Fetches currency exchange rate from BNB.bg based on invoice date, with fallback rates for common currencies
-- Inserts all values into a pre-defined Word template
-- Outputs a ready-to-sign Word invoice in Bulgarian format
+- Extracts and translates customer name, ID, VAT, address, city
+- Differentiates supplier from customer using logic and keywords
+- Parses total amount and VAT (even from various formats)
+- Translates totals into Bulgarian words
+- Uses BNB.bg exchange rate with fallback if unavailable
+- Outputs a ready-to-sign Bulgarian Word invoice (.docx)
 
 ---
 
-## 📦 Installation
+## 📦 Requirements
 
 ```bash
 pip install -r requirements.txt
@@ -25,7 +24,7 @@ pip install -r requirements.txt
 
 ---
 
-## 🚀 Running Locally
+## 🚀 Run Locally
 
 ```bash
 uvicorn main:app --reload
@@ -33,18 +32,17 @@ uvicorn main:app --reload
 
 ---
 
-## 🧾 API Endpoints
+## 📬 API Endpoint
 
 ### `POST /process-invoice/`
 
-Upload an English PDF invoice and a Word template to generate a Bulgarian Word invoice.
+**Form Data:**
+- `supplier_id` (int): Must match `SupplierCompanyID` from `suppliers.xlsx`
+- `file`: English invoice in PDF
+- `template`: Bulgarian Word invoice template (.docx)
 
-**Form Fields:**
-- `supplier_id` (int): Matches `SupplierCompanyID` in `suppliers.xlsx`
-- `file` (PDF): The English invoice
-- `template` (.docx): The Word template with `{{placeholders}}`
+**Example cURL**
 
-**Example:**
 ```bash
 curl -X POST http://localhost:8000/process-invoice/ \
   -F "supplier_id=206232541" \
@@ -56,30 +54,21 @@ curl -X POST http://localhost:8000/process-invoice/ \
 
 ### `GET /download-invoice/{filename}`
 
-Download the generated Word invoice using the file name provided in the response.
+Download the generated invoice file:
 
----
-
-## 📁 File Structure
-
-```
-bultrans/
-├── main.py                       # FastAPI app with endpoints
-├── process.py                    # Main invoice processing logic
-├── suppliers.xlsx                # Supplier data (IBAN, VAT, contact)
-├── requirements.txt              # Python dependencies
-├── templates/
-│   └── BulTrans_Template_Final.docx  # Word template with placeholders
-└── README.md
+```bash
+https://your-domain.com/download-invoice/bulgarian_invoice_0000000002.docx
 ```
 
 ---
 
-## 💡 Notes
+## 🧾 Files
 
-- If exchange rate is missing from BNB, fallback rates are used (USD, EUR, ILS, GBP).
-- Default service description is "Услуга по договор" if not found in the invoice.
-- All numeric values are formatted in Bulgarian text (e.g., 5640 → "Пет хиляди шестстотин и четиридесет лева").
+- `main.py`: FastAPI routes
+- `process.py`: Core invoice logic
+- `suppliers.xlsx`: Supplier data (IBAN, VAT, contact)
+- `templates/`: Contains your Word template
+- `README.md`: This file 😊
 
 ---
 

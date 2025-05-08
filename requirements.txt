@@ -6,4 +6,3 @@ openpyxl
 PyPDF2
 docxtpl
 python-multipart
-python-docx

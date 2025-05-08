@@ -15,7 +15,14 @@ SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# מילון תרגום בסיסי
+FALLBACK_RATES = {
+    "EUR": 1.95583,
+    "USD": 1.80,
+    "ILS": 0.50,
+    "GBP": 2.30,
+    "BGN": 1.0
+}
+
 TRANSLATION_MAP = {
     "Sofia": "София",
     "Varna": "Варна",
@@ -59,15 +66,54 @@ def extract_customer_info(text):
     return customer
 
 def number_to_bulgarian_words(amount):
-    from num2words import num2words
-    return num2words(amount, lang='bg').capitalize()
+    units = ["", "един", "два", "три", "четири", "пет", "шест", "седем", "осем", "девет"]
+    teens = ["десет", "единадесет", "дванадесет", "тринадесет", "четиринадесет", "петнадесет",
+             "шестнадесет", "седемнадесет", "осемнадесет", "деветнадесет"]
+    tens = ["", "", "двадесет", "тридесет", "четиридесет", "петдесет",
+            "шестдесет", "седемдесет", "осемдесет", "деветдесет"]
+    hundreds = ["", "сто", "двеста", "триста", "четиристотин", "петстотин",
+                "шестстотин", "седемстотин", "осемстотин", "деветстотин"]
+    thousands = ["", "хиляда", "две хиляди", "три хиляди", "четири хиляди"]
 
-def extract_field(pattern, text, default=""):
-    match = re.search(pattern, text, re.IGNORECASE)
-    return match.group(1).strip() if match else default
+    def convert_hundreds(n):
+        if n == 0:
+            return ""
+        parts = []
+        h = n // 100
+        t = (n % 100) // 10
+        u = n % 10
+        if h:
+            parts.append(hundreds[h])
+        if t == 1:
+            parts.append(teens[u])
+        else:
+            if t:
+                parts.append(tens[t])
+            if u:
+                parts.append(units[u])
+        return " ".join(parts)
 
-def get_exchange_rate_fallback(date_str, currency):
-    return 1.0 if currency == "BGN" else 1.95583
+    leva = int(amount)
+    stotinki = int(round((amount - leva) * 100))
+
+    parts = []
+
+    if leva == 0:
+        parts.append("нула лева")
+    else:
+        if leva >= 1000:
+            t = leva // 1000
+            parts.append(thousands[t] if t < 5 else units[t] + " хиляди")
+            leva = leva % 1000
+        parts.append(convert_hundreds(leva))
+        parts.append("лева")
+
+    if stotinki > 0:
+        parts.append("и")
+        parts.append(convert_hundreds(stotinki))
+        parts.append("стотинки")
+
+    return " ".join([word for word in parts if word])
 
 def get_exchange_rate_bnb(date: str, currency: str) -> float:
     try:
@@ -78,19 +124,15 @@ def get_exchange_rate_bnb(date: str, currency: str) -> float:
 
         root = ET.fromstring(response.content)
         for record in root.findall('ROW'):
-            date_tag = record.find('DATE')
-            if date_tag is None:
-                continue
-            record_date = date_tag.text.strip()
+            record_date = record.find('DATE').text.strip()
             code = record.find('CODE').text.strip()
             rate = record.find('RATE').text.strip()
             if record_date == date and code == currency:
                 return float(rate.replace(",", "."))
         raise Exception("Rate not found in XML")
-
     except Exception as e:
         print("⚠️ BNB ERROR:", traceback.format_exc())
-        return get_exchange_rate_fallback(date, currency)
+        return FALLBACK_RATES.get(currency, 1.0)
 
 async def process_invoice_upload(supplier_id: int, file: UploadFile, template: UploadFile):
     try:
@@ -112,12 +154,14 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
 
         invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
 
-        invoice_date_raw = extract_field(r"Date:\s*([\d/\.]+)", text)
-        invoice_date = invoice_date_raw.replace("/", ".")
+        invoice_date_raw = re.search(r"Date:\s*([\d/\.]+)", text)
+        if not invoice_date_raw:
+            raise ValueError("Date not found")
+        invoice_date = invoice_date_raw.group(1).replace("/", ".")
         invoice_date_bnb = datetime.datetime.strptime(invoice_date, "%d.%m.%Y").strftime("%Y-%m-%d")
 
-        match = re.search(r"(?i)(Total Amount of Bill|Total Amount|Total):\s*(BGN)?\s*([\d\.,]+)", text)
-        currency = "BGN"
+        match = re.search(r"(?i)(Total Amount of Bill|Total Amount|Total):\s*([A-Z]{3})?\s*([\d\.,]+)", text)
+        currency = match.group(2) if match and match.group(2) else "BGN"
         amount = float(match.group(3).replace(",", "")) if match else 0.0
 
         exchange_rate = get_exchange_rate_bnb(invoice_date_bnb, currency)

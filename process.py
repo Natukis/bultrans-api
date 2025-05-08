@@ -9,12 +9,61 @@ from fastapi import UploadFile
 from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
-from num2words import num2words
 import traceback
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def number_to_bulgarian_words(amount):
+    units = ["", "един", "два", "три", "четири", "пет", "шест", "седем", "осем", "девет"]
+    teens = ["десет", "единадесет", "дванадесет", "тринадесет", "четиринадесет", "петнадесет",
+             "шестнадесет", "седемнадесет", "осемнадесет", "деветнадесет"]
+    tens = ["", "", "двадесет", "тридесет", "четиридесет", "петдесет",
+            "шестдесет", "седемдесет", "осемдесет", "деветдесет"]
+    hundreds = ["", "сто", "двеста", "триста", "четиристотин", "петстотин",
+                "шестстотин", "седемстотин", "осемстотин", "деветстотин"]
+    thousands = ["", "хиляда", "две хиляди", "три хиляди", "четири хиляди"]
+
+    def convert_hundreds(n):
+        if n == 0:
+            return ""
+        parts = []
+        h = n // 100
+        t = (n % 100) // 10
+        u = n % 10
+        if h:
+            parts.append(hundreds[h])
+        if t == 1:
+            parts.append(teens[u])
+        else:
+            if t:
+                parts.append(tens[t])
+            if u:
+                parts.append(units[u])
+        return " ".join(parts)
+
+    leva = int(amount)
+    stotinki = int(round((amount - leva) * 100))
+
+    parts = []
+
+    if leva == 0:
+        parts.append("нула лева")
+    else:
+        if leva >= 1000:
+            t = leva // 1000
+            parts.append(thousands[t] if t < 5 else units[t] + " хиляди")
+            leva = leva % 1000
+        parts.append(convert_hundreds(leva))
+        parts.append("лева")
+
+    if stotinki > 0:
+        parts.append("и")
+        parts.append(convert_hundreds(stotinki))
+        parts.append("стотинки")
+
+    return " ".join([word for word in parts if word])
 
 def extract_field(pattern, text, default=""):
     match = re.search(pattern, text, re.IGNORECASE)
@@ -85,7 +134,7 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
             vat_amount = None
             total_bgn = amount_bgn
 
-        total_in_words = num2words(total_bgn, lang='bg').capitalize()
+        total_in_words = number_to_bulgarian_words(total_bgn).capitalize()
 
         data = {
             "InvoiceNumber": invoice_number,

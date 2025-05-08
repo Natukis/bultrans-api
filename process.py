@@ -15,6 +15,36 @@ SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+def extract_recipient_info(text):
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    recipient = {
+        "RecipientName": "",
+        "RecipientID": "",
+        "RecipientVAT": "",
+        "RecipientAddress": "",
+        "RecipientCity": ""
+    }
+    
+    for i, line in enumerate(lines):
+        if "ID No" in line and i + 1 < len(lines) and "VAT No" in lines[i+1] and i >= 1:
+            recipient["RecipientName"] = lines[i - 1]
+            id_match = re.search(r"ID No[:\s]*(\d+)", line)
+            vat_match = re.search(r"VAT No[:\s]*(\w+)", lines[i + 1])
+            recipient["RecipientID"] = id_match.group(1) if id_match else ""
+            recipient["RecipientVAT"] = vat_match.group(1) if vat_match else ""
+            if i + 2 < len(lines):
+                recipient["RecipientAddress"] = lines[i + 2]
+            if i + 3 < len(lines):
+                recipient["RecipientCity"] = lines[i + 3]
+            break
+
+    if not recipient["RecipientCity"]:
+        city_match = re.search(r"\b(Sofia|Varna|Plovdiv|Burgas|Ruse)\b", text, re.IGNORECASE)
+        if city_match:
+            recipient["RecipientCity"] = city_match.group(1)
+
+    return recipient
+
 def number_to_bulgarian_words(amount):
     units = ["", "един", "два", "три", "четири", "пет", "шест", "седем", "осем", "девет"]
     teens = ["десет", "единадесет", "дванадесет", "тринадесет", "четиринадесет", "петнадесет",
@@ -70,7 +100,7 @@ def extract_field(pattern, text, default=""):
     return match.group(1).strip() if match else default
 
 def get_exchange_rate_fallback(date_str, currency):
-    return 1.95583
+    return 1.0 if currency == "BGN" else 1.95583
 
 def get_exchange_rate_bnb(date: str, currency: str) -> float:
     try:
@@ -81,7 +111,10 @@ def get_exchange_rate_bnb(date: str, currency: str) -> float:
 
         root = ET.fromstring(response.content)
         for record in root.findall('ROW'):
-            record_date = record.find('DATE').text.strip()
+            date_tag = record.find('DATE')
+            if date_tag is None:
+                continue
+            record_date = date_tag.text.strip()
             code = record.find('CODE').text.strip()
             rate = record.find('RATE').text.strip()
             if record_date == date and code == currency:
@@ -108,20 +141,24 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
         suppliers = pd.read_excel(SUPPLIERS_PATH)
         required_columns = ["SupplierCompanyID", "Last invoice number", "IBAN", "Bankname", "BankCode",
                             "SupplierName", "SupplierCompanyVAT", "SupplierCity", "SupplierAddress", "SupplierContactPerson"]
-        for col in required_columns:
-            if col not in suppliers.columns:
-                raise ValueError(f"Missing required column in suppliers file: {col}")
+        missing_cols = set(required_columns) - set(suppliers.columns)
+        if missing_cols:
+            raise ValueError(f"Missing columns in suppliers file: {missing_cols}")
 
         row = suppliers[suppliers["SupplierCompanyID"] == supplier_id]
         if row.empty:
             raise ValueError("Supplier not found")
 
         invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
-        invoice_date = extract_field(r"Date:\s*([\d/\.]+)", text).replace("/", ".")
+
+        invoice_date_raw = extract_field(r"Date:\s*([\d/\.]+)", text)
+        if not invoice_date_raw:
+            raise ValueError("Date not found in invoice text")
+        invoice_date = invoice_date_raw.replace("/", ".")
         invoice_date_bnb = datetime.datetime.strptime(invoice_date, "%d.%m.%Y").strftime("%Y-%m-%d")
 
-        match = re.search(r"Total Amount of Bill:\s*([A-Z]{3})\s*([\d\.,]+)", text)
-        currency, amount = (match.group(1), float(match.group(2).replace(",", ""))) if match else ("EUR", 0)
+        match = re.search(r"(?i)Total:\s*([A-Z]{3})\s*([\d\.,]+)", text)
+        currency, amount = (match.group(1), float(match.group(2).replace(",", ""))) if match else ("BGN", 0)
 
         exchange_rate = get_exchange_rate_bnb(invoice_date_bnb, currency)
         amount_bgn = round(amount * exchange_rate, 2)
@@ -136,15 +173,11 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
 
         total_in_words = number_to_bulgarian_words(total_bgn).capitalize()
 
+        recipient = extract_recipient_info(text)
+
         data = {
             "InvoiceNumber": invoice_number,
             "Date": invoice_date,
-            "CustomerName": extract_field(r"Customer Name:\s*(.+)", text),
-            "CustomerVAT": extract_field(r"Customer VAT:\s*(.+)", text),
-            "CustomerID": extract_field(r"Customer ID:\s*(.+)", text),
-            "CustomerAddress": extract_field(r"Customer Address:\s*(.+)", text),
-            "RecipientCity": extract_field(r"Customer City:\s*(.+)", text),
-            "ServiceDescription": extract_field(r"Service Description:\s*(.+)", text),
             "Amount": amount,
             "Currency": currency,
             "ExchangeRate": exchange_rate,
@@ -167,6 +200,8 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
             "Month": datetime.datetime.now().strftime("%B"),
             "Year": datetime.datetime.now().year
         }
+
+        data.update(recipient)
 
         save_path = f"/tmp/bulgarian_invoice_{invoice_number}.docx"
         doc = DocxTemplate(template_path)

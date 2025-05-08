@@ -24,7 +24,7 @@ def extract_recipient_info(text):
         "RecipientAddress": "",
         "RecipientCity": ""
     }
-    
+
     for i, line in enumerate(lines):
         if "ID No" in line and i + 1 < len(lines) and "VAT No" in lines[i+1] and i >= 1:
             recipient["RecipientName"] = lines[i - 1]
@@ -139,76 +139,26 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
         text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
 
         suppliers = pd.read_excel(SUPPLIERS_PATH)
-        required_columns = ["SupplierCompanyID", "Last invoice number", "IBAN", "Bankname", "BankCode",
-                            "SupplierName", "SupplierCompanyVAT", "SupplierCity", "SupplierAddress", "SupplierContactPerson"]
-        missing_cols = set(required_columns) - set(suppliers.columns)
-        if missing_cols:
-            raise ValueError(f"Missing columns in suppliers file: {missing_cols}")
-
         row = suppliers[suppliers["SupplierCompanyID"] == supplier_id]
         if row.empty:
             raise ValueError("Supplier not found")
 
-        invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
-
         invoice_date_raw = extract_field(r"Date:\s*([\d/\.]+)", text)
-        if not invoice_date_raw:
-            raise ValueError("Date not found in invoice text")
         invoice_date = invoice_date_raw.replace("/", ".")
         invoice_date_bnb = datetime.datetime.strptime(invoice_date, "%d.%m.%Y").strftime("%Y-%m-%d")
 
-        match = re.search(r"(?i)Total:\s*([A-Z]{3})\s*([\d\.,]+)", text)
-        currency, amount = (match.group(1), float(match.group(2).replace(",", ""))) if match else ("BGN", 0)
-
-        exchange_rate = get_exchange_rate_bnb(invoice_date_bnb, currency)
-        amount_bgn = round(amount * exchange_rate, 2)
-
-        vat_match = re.search(r"VAT\s+(\d+)%:\s*([\d\.,]+)", text)
-        if vat_match:
-            vat_amount = float(vat_match.group(2).replace(",", ""))
-            total_bgn = amount_bgn + vat_amount
-        else:
-            vat_amount = None
-            total_bgn = amount_bgn
-
-        total_in_words = number_to_bulgarian_words(total_bgn).capitalize()
-
-        recipient = extract_recipient_info(text)
-
         data = {
-            "InvoiceNumber": invoice_number,
-            "Date": invoice_date,
-            "Amount": amount,
-            "Currency": currency,
-            "ExchangeRate": exchange_rate,
-            "AmountBGN": amount_bgn,
-            "VATAmount": vat_amount if vat_amount else "",
-            "TotalBGN": total_bgn,
-            "TotalInWords": total_in_words,
-            "TransactionCountry": "България",
-            "TransactionBasis": "По сметка",
-            "IBAN": row["IBAN"].values[0],
-            "BankName": row["Bankname"].values[0],
-            "BankCode": row["BankCode"].values[0],
-            "SupplierName": row["SupplierName"].values[0],
-            "SupplierCompanyVAT": row["SupplierCompanyVAT"].values[0],
-            "SupplierCompanyID": row["SupplierCompanyID"].values[0],
-            "SupplierCity": row["SupplierCity"].values[0],
-            "SupplierAddress": row["SupplierAddress"].values[0],
-            "SupplierContactPerson": row["SupplierContactPerson"].values[0],
-            "CompiledBy": row["SupplierContactPerson"].values[0],
-            "Month": datetime.datetime.now().strftime("%B"),
-            "Year": datetime.datetime.now().year
+            "Date": invoice_date
         }
 
-        data.update(recipient)
+        print("📅 Injecting Date:", data.get("Date"))
 
-        save_path = f"/tmp/bulgarian_invoice_{invoice_number}.docx"
         doc = DocxTemplate(template_path)
         doc.render(data)
+        save_path = f"/tmp/debug_test.docx"
         doc.save(save_path)
 
-        return JSONResponse(content={"success": True, "invoice_number": invoice_number, "file_path": save_path})
+        return JSONResponse(content={"success": True, "file_path": save_path})
     except Exception as e:
         print("❌ INTERNAL ERROR:", traceback.format_exc())
         return JSONResponse(content={"success": False, "error": str(e)})

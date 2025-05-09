@@ -245,8 +245,10 @@ async def process_invoice_upload(supplier_id, file, template):
         log(f"Invoice saved to: {output_path}")
         return JSONResponse({
             "success": True,
-            "invoice_number": context['InvoiceNumber'],
-            "file_path": f"https://bultrans-api.onrender.com/download-invoice/{output_filename}"
+            "data": {
+                "invoice_number": context['InvoiceNumber'],
+                "file_path": f"https://bultrans-api.onrender.com/download-invoice/{output_filename}"
+            }
         })
 
     except Exception as e:

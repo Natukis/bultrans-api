@@ -9,25 +9,25 @@ from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 from xml.etree import ElementTree as ET
-from google.cloud import translate_v2 as translate
 from docx import Document
-from io import BytesIO
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-translator = translate.Client(api_key=GOOGLE_API_KEY)
-
 def auto_translate(text, target_lang="bg"):
-    try:
-        if not text.strip():
-            return text
-        result = translator.translate(text, target_language=target_lang)
-        return result.get("translatedText", text)
-    except:
+    if not text.strip():
         return text
+    api_key = os.getenv("GOOGLE_API_KEY")
+    url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
+    payload = {"q": text, "target": target_lang}
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            return response.json()["data"]["translations"][0]["translatedText"]
+    except:
+        pass
+    return text
 
 def number_to_bulgarian_words(amount):
     try:
@@ -91,7 +91,6 @@ def extract_text_from_pdf(file_path):
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
         if text.strip():
             return text
-        # Fallback to OCR
         images = convert_from_path(file_path)
         return "\n".join(pytesseract.image_to_string(img) for img in images)
     except:

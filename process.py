@@ -50,24 +50,30 @@ def extract_customer_info(text):
         "RecipientAddress": "",
         "RecipientCity": ""
     }
-    vat_ids = re.findall(r"(BG\d{6,})", text)
-    ids = re.findall(r"ID No[:]?\s*(\d{6,})", text)
-    names = re.findall(r"Customer Name:\s*([A-Za-z0-9 .,&-]+)", text)
-    addresses = re.findall(r"Address:\s*(.*)", text)
+    try:
+        customer_name = re.search(r"Customer Name:\s*(.+?)\\n", text)
+        if customer_name:
+            cleaned_name = customer_name.group(1).replace("Supplier", "").strip()
+            customer["RecipientName"] = translate_text(cleaned_name)
 
-    if names:
-        cleaned_name = names[0].replace("Supplier", "").strip()
-        customer["RecipientName"] = translate_text(cleaned_name)
-    if ids:
-        customer["RecipientID"] = ids[0].strip()
-    if vat_ids:
-        customer["RecipientVAT"] = vat_ids[0].strip()
-    if addresses:
-        customer["RecipientAddress"] = translate_text(addresses[0].strip())
-    city_match = re.search(r"\b(Sofia|Varna|Burgas|Plovdiv)\b", text)
-    if city_match:
-        customer["RecipientCity"] = translate_text(city_match.group(1))
+        id_match = re.search(r"ID No[:]*\s*(\d+)", text)
+        if id_match:
+            customer["RecipientID"] = id_match.group(1).strip()
 
+        vat_match = re.search(r"VAT No[:]*\s*(BG\d+)", text)
+        if vat_match:
+            customer["RecipientVAT"] = vat_match.group(1).strip()
+
+        address_match = re.search(r"Address:\s*(.+?)\\n", text)
+        if address_match:
+            address_line = address_match.group(1).strip()
+            customer["RecipientAddress"] = translate_text(address_line)
+
+        city_match = re.search(r"\\b(Sofia|Varna|Burgas|Plovdiv)\\b", text)
+        if city_match:
+            customer["RecipientCity"] = translate_text(city_match.group(1))
+    except Exception:
+        pass
     return customer
 
 def number_to_bulgarian_words(amount):
@@ -96,10 +102,10 @@ def get_exchange_rate_bnb(date: str, currency: str) -> float:
 
 def extract_invoice_date(text):
     patterns = [
-        (r"\b(\d{1,2}[./]\d{1,2}[./]\d{2,4})\b", "%d.%m.%Y"),
-        (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),
-        (r"\b([A-Za-z]{3,9} \d{1,2}, \d{4})\b", "%B %d %Y"),
-        (r"\b([A-Za-z]{3} \d{1,2}, \d{4})\b", "%b %d %Y")
+        (r"\\b(\\d{1,2}[./]\\d{1,2}[./]\\d{2,4})\\b", "%d.%m.%Y"),
+        (r"\\b(\\d{4}-\\d{2}-\\d{2})\\b", "%Y-%m-%d"),
+        (r"\\b([A-Za-z]{3,9} \\d{1,2}, \\d{4})\\b", "%B %d %Y"),
+        (r"\\b([A-Za-z]{3} \\d{1,2}, \\d{4})\\b", "%b %d %Y")
     ]
     for pattern, fmt in patterns:
         match = re.search(pattern, text)
@@ -112,7 +118,7 @@ def extract_invoice_date(text):
     return "", ""
 
 def safe_extract_float(segment):
-    match = re.findall(r"\d+[.,]?\d*", segment)
+    match = re.findall(r"\\d+[.,]?\\d*", segment)
     return float(match[0].replace(",", "")) if match else 0.0
 
 async def process_invoice_upload(supplier_id: int, file: UploadFile, template: UploadFile):
@@ -142,7 +148,7 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
 
         amount = safe_extract_float(total_match.group(1)) if total_match else 0.0
         vat_amount = safe_extract_float(vat_match.group(1)) if vat_match else 0.0
-        total_bgn = safe_extract_float(final_match.group(1)) if final_match else 0.0
+        total_bgn = safe_extract_float(final_match.group(1)) if final_match else amount + vat_amount
         total_in_words = number_to_bulgarian_words(total_bgn)
 
         currency_match = re.search(r"\b(USD|EUR|BGN|ILS|GBP)\b", text)

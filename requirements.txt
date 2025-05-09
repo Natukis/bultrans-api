@@ -11,3 +11,4 @@ python-docx
 pytesseract
 pdf2image
 Pillow
+pytest

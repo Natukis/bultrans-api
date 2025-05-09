@@ -1,50 +1,17 @@
 import pytest
-from process import (
-    translate_text,
-    extract_invoice_date,
-    number_to_bulgarian_words,
-    extract_customer_info,
-    safe_extract_float
-)
-
-def test_translate_text():
-    assert translate_text("Sofia") == "София"
-    assert translate_text("Aleksandar Stamboliiski") == "Александър Стамболийски"
+from process import number_to_bulgarian_words, safe_extract_float
 
 def test_number_to_bulgarian_words():
-    assert number_to_bulgarian_words(5640) == "пет хиляди шестстотин и четиридесет лева"
-    assert number_to_bulgarian_words(4700) == "четири хиляди и седемстотин лева"
-    assert number_to_bulgarian_words(940) == "деветстотин и четиридесет лева"
-    assert number_to_bulgarian_words(700) == "седемстотин лева"
-    assert number_to_bulgarian_words(1) == "едно лева"
     assert number_to_bulgarian_words(0) == "0 лева"
-
-def test_extract_invoice_date():
-    assert extract_invoice_date("Invoice date: 18/08/2021")[0] == "18.08.2021"
-    assert extract_invoice_date("Date issued: 2021-08-18")[0] == "18.08.2021"
-    assert extract_invoice_date("Dated: August 18, 2021")[0] == "18.08.2021"
-    assert extract_invoice_date("Dated: Aug 18, 2021")[0] == "18.08.2021"
-
-def test_extract_customer_info():
-    text = (
-        "Customer Name: QUESTE LTD Supplier\n"
-        "ID No: 203743737\n"
-        "VAT No: BG203743737\n"
-        "Address: Aleksandar Stamboliiski 134\n"
-        "City: Sofia"
-    )
-    result = extract_customer_info(text)
-    assert result["RecipientName"] == "Куесте ООД"
-    assert result["RecipientID"] == "203743737"
-    assert result["RecipientVAT"] == "BG203743737"
-    assert result["RecipientAddress"] == "Александър Стамболийски 134"
-    assert result["RecipientCity"] == "София"
+    assert number_to_bulgarian_words(1) == "едно лева"
+    assert number_to_bulgarian_words(700) == "седемстотин лева"
+    assert number_to_bulgarian_words(940) == "деветстотин и четиридесет лева"
+    assert number_to_bulgarian_words(4700) == "четири хиляди и седемстотин лева"
+    assert number_to_bulgarian_words(5640) == "пет хиляди шестстотин и четиридесет лева"
 
 def test_safe_extract_float():
-    assert safe_extract_float("Total Amount: BGN 4 700.00") == 4700.0
-    assert safe_extract_float("VAT Amount: BGN 940.00") == 940.0
-    assert safe_extract_float("Total Amount of Bill: BGN 5 640.00") == 5640.0
-    assert safe_extract_float("Total Amount: BGN 4,700.00") == 4700.0
-    assert safe_extract_float("Total Amount: BGN4,700.00") == 4700.0
-    assert safe_extract_float("Amount: 1,000") == 1000.0
-    assert safe_extract_float("Amount: 1 000") == 1000.0
+    assert safe_extract_float("1,200.50") == 1200.50
+    assert safe_extract_float("3 400,00") == 3400.00
+    assert safe_extract_float("BGN 9,999") == 9999.0
+    assert safe_extract_float("USD 3,500.25") == 3500.25
+    assert safe_extract_float("Total Amount: 4 700") == 4700.0

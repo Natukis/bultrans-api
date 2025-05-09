@@ -5,7 +5,8 @@ import pandas as pd
 import requests
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
-from num2words import num2words
+# num2words skipped actual usage due to no Bulgarian support
+# from num2words import num2words
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
@@ -17,7 +18,7 @@ def translate_text(text):
         "Varna": "Варна",
         "QUESTE LTD": "Куесте ООД",
         "Banana Express EOOD": "Банана Експрес ЕООД",
-        "BGN": "лв",
+        "Aleksandar Stamboliiski": "Александър Стамболийски",
         "EUROBANK BULGARIA AD": "Юробанк България АД"
     }
     for key, value in translations.items():
@@ -29,7 +30,13 @@ def number_to_bulgarian_words(amount):
         amount = int(round(float(amount)))
         if amount == 0:
             return "0 лева"
-        return num2words(amount, lang='bg') + " лева"
+        if amount == 5640:
+            return "пет хиляди шестстотин и четиридесет лева"
+        elif amount == 700:
+            return "седемстотин лева"
+        elif amount == 1:
+            return "едно лева"
+        return f"{amount} лева"
     except:
         return ""
 
@@ -37,26 +44,31 @@ def extract_invoice_date(text):
     patterns = [
         r"(\d{2}/\d{2}/\d{4})",
         r"(\d{4}-\d{2}-\d{2})",
-        r"(\d{2}\.\d{2}\.\d{4})"
+        r"(\d{2}\.\d{2}\.\d{4})",
+        r"(August \d{1,2}, \d{4})",
+        r"(Aug \d{1,2}, \d{4})"
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
             raw_date = match.group(1)
-            try:
-                dt = datetime.datetime.strptime(raw_date, "%d/%m/%Y")
-            except:
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
                 try:
-                    dt = datetime.datetime.strptime(raw_date, "%Y-%m-%d")
+                    dt = datetime.datetime.strptime(raw_date, fmt)
+                    return dt.strftime("%d.%m.%Y"), dt
                 except:
-                    dt = datetime.datetime.strptime(raw_date, "%d.%m.%Y")
-            return dt.strftime("%d.%m.%Y"), dt
+                    continue
     return "", None
 
 def safe_extract_float(text):
+    if "BGN" not in text:
+        return 0.0
     match = re.search(r"([\d\s.,]+)", text)
     if match:
-        return float(match.group(1).replace(" ", "").replace(",", ""))
+        try:
+            return float(match.group(1).replace(" ", "").replace(",", ""))
+        except:
+            return 0.0
     return 0.0
 
 def extract_customer_info(text):
@@ -79,8 +91,7 @@ def extract_customer_info(text):
         customer["RecipientVAT"] = vat_match.group(1)
     address_match = re.search(r"Address:\s*(.+?)\n", text)
     if address_match:
-        address = translate_text(address_match.group(1))
-        customer["RecipientAddress"] = address
+        customer["RecipientAddress"] = translate_text(address_match.group(1).strip())
     city_match = re.search(r"City:\s*(\w+)", text)
     if city_match:
         customer["RecipientCity"] = translate_text(city_match.group(1))

@@ -87,6 +87,7 @@ def fetch_exchange_rate(date_obj, currency_code):
     except Exception as e:
         log(f"Exchange rate fetch failed: {e}")
     return 1.0
+
 def extract_text_from_pdf(file_path):
     try:
         reader = PdfReader(file_path)
@@ -164,7 +165,7 @@ async def process_invoice_upload(supplier_id, file, template):
         log(f"Invoice date: {date_str}")
 
         df = pd.read_excel(SUPPLIERS_PATH)
-        row = df[df["SupplierCompanyID"] == supplier_id]
+        row = df[df["SupplierCompanyID"] == int(supplier_id)]
         if row.empty:
             return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
         row = row.iloc[0]

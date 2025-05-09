@@ -111,6 +111,10 @@ def extract_invoice_date(text):
                 continue
     return "", ""
 
+def safe_extract_float(segment):
+    match = re.findall(r"\d+[.,]?\d*", segment)
+    return float(match[0].replace(",", "")) if match else 0.0
+
 async def process_invoice_upload(supplier_id: int, file: UploadFile, template: UploadFile):
     try:
         invoice_path = os.path.join(UPLOAD_DIR, file.filename)
@@ -122,6 +126,8 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
 
         reader = PdfReader(invoice_path)
         text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+        text = text.replace("\n", " ")
+
         suppliers = pd.read_excel(SUPPLIERS_PATH)
         row = suppliers[suppliers["SupplierCompanyID"] == supplier_id]
         if row.empty:
@@ -130,21 +136,14 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
         invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
         invoice_date, invoice_date_bnb = extract_invoice_date(text)
 
-        amount = vat_amount = total_bgn = 0.0
-        amount_match = re.search(r"Total Amount:\s*BGN\s*([\d\s,.]+)", text)
-        if amount_match:
-            amount = float(amount_match.group(1).replace(" ", "").replace(",", ""))
-
+        total_match = re.search(r"Total Amount:\s*BGN\s*([\d\s,.]+)", text)
         vat_match = re.search(r"VAT Amount:\s*BGN\s*([\d\s,.]+)", text)
-        if vat_match:
-            vat_amount = float(vat_match.group(1).replace(" ", "").replace(",", ""))
-
         final_match = re.search(r"Total Amount of Bill:\s*BGN\s*([\d\s,.]+)", text)
-        if final_match:
-            total_bgn = float(final_match.group(1).replace(" ", "").replace(",", ""))
-            total_in_words = number_to_bulgarian_words(total_bgn)
-        else:
-            total_in_words = "0 лева"
+
+        amount = safe_extract_float(total_match.group(1)) if total_match else 0.0
+        vat_amount = safe_extract_float(vat_match.group(1)) if vat_match else 0.0
+        total_bgn = safe_extract_float(final_match.group(1)) if final_match else 0.0
+        total_in_words = number_to_bulgarian_words(total_bgn)
 
         currency_match = re.search(r"\b(USD|EUR|BGN|ILS|GBP)\b", text)
         currency = currency_match.group(1) if currency_match else "BGN"

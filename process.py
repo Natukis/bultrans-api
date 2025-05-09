@@ -6,6 +6,7 @@ import requests
 from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
+from xml.etree import ElementTree as ET
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
@@ -15,9 +16,6 @@ def translate_text(text):
     translations = {
         "Sofia": "София",
         "Varna": "Варна",
-        "QUESTE LTD": "Куесте ООД",
-        "Banana Express EOOD": "Банана Експрес ЕООД",
-        "Aleksandar Stamboliiski": "Александър Стамболийски",
         "EUROBANK BULGARIA AD": "Юробанк България АД"
     }
     for key, value in translations.items():
@@ -29,7 +27,7 @@ def number_to_bulgarian_words(amount):
         amount = int(round(float(amount)))
         if amount == 0:
             return "0 лева"
-        if amount == 5640:
+        elif amount == 5640:
             return "пет хиляди шестстотин и четиридесет лева"
         elif amount == 4700:
             return "четири хиляди и седемстотин лева"
@@ -64,7 +62,7 @@ def extract_invoice_date(text):
     return "", None
 
 def safe_extract_float(text):
-    match = re.search(r"(\d[\d\s,\.]+)", text)
+    match = re.search(r"(\d[\d\s,.]+)", text)
     if match:
         try:
             num = match.group(1)
@@ -74,6 +72,22 @@ def safe_extract_float(text):
             return 0.0
     return 0.0
 
+def fetch_exchange_rate(date_obj, currency_code):
+    try:
+        url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml&search=true&date={date_obj.strftime('%d.%m.%Y')}"
+        response = requests.get(url)
+        if response.status_code != 200:
+            return 1.0
+        root = ET.fromstring(response.content)
+        for row in root.findall(".//ROW"):
+            code = row.find("CODE").text
+            if code == currency_code.upper():
+                rate = row.find("RATE").text
+                return float(rate.replace(",", "."))
+        return 1.0
+    except:
+        return 1.0
+
 def extract_customer_info(text):
     customer = {
         "RecipientName": "",
@@ -82,10 +96,9 @@ def extract_customer_info(text):
         "RecipientAddress": "",
         "RecipientCity": ""
     }
-    name_match = re.search(r"Customer Name:\s*([A-Za-z0-9 .,&-]+)", text)
+    name_match = re.search(r"Customer Name:\s*([\w\s.,&\-]+)", text)
     if name_match:
-        cleaned = name_match.group(1).replace("Supplier", "").strip()
-        customer["RecipientName"] = translate_text(cleaned)
+        customer["RecipientName"] = name_match.group(1).strip()
 
     id_match = re.search(r"ID No:\s*(\d+)", text)
     if id_match:
@@ -97,12 +110,11 @@ def extract_customer_info(text):
 
     address_match = re.search(r"Address:\s*(.+)", text)
     if address_match:
-        customer["RecipientAddress"] = translate_text(address_match.group(1).strip())
+        customer["RecipientAddress"] = address_match.group(1).strip()
 
-    # שליפת עיר גם אם אין "City:"
     city_match = re.search(r"\b(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)\b", text)
     if city_match:
-        customer["RecipientCity"] = translate_text(city_match.group(1))
+        customer["RecipientCity"] = city_match.group(1)
 
     return customer
 
@@ -132,27 +144,34 @@ async def process_invoice_upload(supplier_id, file, template):
             return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
         row = row.iloc[0]
 
-        # חילוץ סכומים
+        currency_code = "EUR"
+        for curr in ["USD", "EUR", "GBP", "ILS"]:
+            if curr in text:
+                currency_code = curr
+                break
+
+        exchange_rate = fetch_exchange_rate(date_obj, currency_code) if date_obj else 1.0
+
         amount = vat = total = 0.0
-        lines = text.splitlines()
-        for line in lines:
-            if "Total Amount:" in line:
-                amount = safe_extract_float(line)
-            elif "VAT Amount" in line:
-                vat = safe_extract_float(line)
-            elif "Total Amount of Bill" in line:
+        for line in text.splitlines():
+            if "Total Amount of Bill" in line:
                 total = safe_extract_float(line)
+            elif "VAT Amount" in line or "VAT:" in line:
+                vat = safe_extract_float(line)
+            elif "Total Amount:" in line or "Amount:" in line:
+                amount = safe_extract_float(line)
 
         if total == 0.0 and amount > 0 and vat > 0:
             total = amount + vat
+        if amount == 0.0 and total > 0 and vat > 0:
+            amount = total - vat
 
-        amount_bgn = round(amount, 2)
-        vat_amount = round(vat, 2)
-        total_bgn = round(total, 2)
+        amount_bgn = round(amount * exchange_rate, 2)
+        vat_amount = round(vat * exchange_rate, 2)
+        total_bgn = round(total * exchange_rate, 2)
 
         context = {
             **customer,
-            "RecipientName": translate_text(customer.get("RecipientName", "")),
             "SupplierName": translate_text(row["SupplierName"]),
             "SupplierCompanyID": str(row["SupplierCompanyID"]),
             "SupplierCompanyVAT": str(row["SupplierCompanyVAT"]),
@@ -165,13 +184,14 @@ async def process_invoice_upload(supplier_id, file, template):
             "InvoiceNumber": f"{int(row['Last invoice number']) + 1:08d}",
             "Date": date_str,
             "ServiceDescription": "Услуга по договор",
-            "Cur": "BGN",
+            "Cur": currency_code,
             "Amount": 1,
             "UnitPrice": amount_bgn,
             "LineTotal": amount_bgn,
             "AmountBGN": amount_bgn,
             "VATAmount": vat_amount,
             "TotalBGN": total_bgn,
+            "ExchangeRate": exchange_rate,
             "TotalInWords": number_to_bulgarian_words(total_bgn),
             "TransactionCountry": "България",
             "TransactionBasis": "По сметка",

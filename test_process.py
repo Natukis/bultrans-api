@@ -23,17 +23,17 @@ def test_extract_invoice_date():
     assert extract_invoice_date(text4)[0] == "18.08.2021"
 
 def test_extract_customer_info_mixed_text():
-    sample_text = '''
-    Supplier: Banana Express EOOD
-    VAT No: BG206232541
-    ID: 206232541
-    Address: Business Park Varna, Building 8
-
-    Customer Name: QUESTE LTD
-    ID No: 203743737
-    VAT No: BG203743737
-    Address: Aleksandar Stamboliiski 134, Sofia
-    '''
+    sample_text = (
+        "Supplier: Banana Express EOOD\n"
+        "VAT No: BG206232541\n"
+        "ID: 206232541\n"
+        "Address: Business Park Varna, Building 8\n"
+        "\n"
+        "Customer Name: QUESTE LTD\n"
+        "ID No: 203743737\n"
+        "VAT No: BG203743737\n"
+        "Address: Aleksandar Stamboliiski 134, Sofia"
+    )
     result = extract_customer_info(sample_text)
     assert result["RecipientName"] == "Куесте ООД"
     assert result["RecipientID"] == "203743737"

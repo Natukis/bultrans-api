@@ -13,8 +13,9 @@ def test_translate_text():
 
 def test_number_to_bulgarian_words():
     assert number_to_bulgarian_words(5640) == "пет хиляди шестстотин и четиридесет лева"
-    assert number_to_bulgarian_words(4700) == "четири хиляди ו… שבע מאות לева"  # תלוי בתרגום שלך
+    assert number_to_bulgarian_words(4700) == "четири хиляди и седемстотин лева"
     assert number_to_bulgarian_words(940) == "деветстотин и четиридесет лева"
+    assert number_to_bulgarian_words(700) == "седемстотин лева"
     assert number_to_bulgarian_words(1) == "едно лева"
     assert number_to_bulgarian_words(0) == "0 лева"
 

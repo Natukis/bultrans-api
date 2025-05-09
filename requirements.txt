@@ -7,4 +7,7 @@ PyPDF2
 requests
 openpyxl
 google-cloud-translate==2.0.1
-pytest
+python-docx
+pytesseract
+pdf2image
+Pillow

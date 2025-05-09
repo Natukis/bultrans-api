@@ -1,8 +1,10 @@
 fastapi
-pydantic
 uvicorn
-pandas
-docxtpl
-PyPDF2
 requests
+pandas
 openpyxl
+PyPDF2
+docxtpl
+python-multipart
+num2words
+pytest

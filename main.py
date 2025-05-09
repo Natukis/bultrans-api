@@ -6,9 +6,10 @@ import os
 
 app = FastAPI()
 
+# ✅ מתיר בקשות רק מהאתר שלך ב־Base44
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://app--bul-trans-e5149297.base44.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

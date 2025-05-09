@@ -1,34 +1,54 @@
 
 # BulTrans – Bulgarian Invoice Converter 🇧🇬
 
-A FastAPI-based service that converts English PDF invoices into legally-compliant Bulgarian Word (.docx) invoices using a supplier database and currency exchange from BNB.bg.
+A FastAPI-based service that converts English PDF invoices into legally-compliant Bulgarian Word (.docx) invoices using a supplier database and exchange rates from BNB.bg.
 
 ---
 
 ## ✅ Features
 
 - Extracts and translates customer name, ID, VAT, address, city
-- Differentiates supplier from customer using logic and keywords
-- Parses total amount and VAT (even from various formats)
-- Translates totals into Bulgarian words
-- Uses BNB.bg exchange rate with fallback if unavailable
+- Differentiates supplier from customer automatically
+- Parses total amount and VAT (supports multiple formats)
+- Translates total amount into Bulgarian words
+- Uses official exchange rate from BNB.bg (with fallback)
 - Outputs a ready-to-sign Bulgarian Word invoice (.docx)
 
 ---
 
-## 📦 Requirements
+## 📦 Installation
 
+### Clone the repo
+```bash
+git clone https://github.com/YOUR_USERNAME/bultrans-api.git
+cd bultrans-api
+```
+
+### Create a virtual environment (recommended)
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+```
+
+### Install runtime dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
+### Install dev dependencies (for development, testing, formatting)
+```bash
+pip install -r requirements-dev.txt
+```
+
 ---
 
-## 🚀 Run Locally
+## 🚀 Run the API locally
 
 ```bash
 uvicorn main:app --reload
 ```
+
+Then open: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
@@ -36,39 +56,48 @@ uvicorn main:app --reload
 
 ### `POST /process-invoice/`
 
-**Form Data:**
+Form Data:
 - `supplier_id` (int): Must match `SupplierCompanyID` from `suppliers.xlsx`
-- `file`: English invoice in PDF
+- `file`: English invoice in PDF format
 - `template`: Bulgarian Word invoice template (.docx)
 
 **Example cURL**
-
 ```bash
 curl -X POST http://localhost:8000/process-invoice/ \
   -F "supplier_id=206232541" \
   -F "file=@Invoice.pdf" \
-  -F "template=@templates/BulTrans_Template_Final.docx"
+  -F "template=@templates/BulTrans_Template_FinalFInal.docx"
 ```
 
 ---
 
 ### `GET /download-invoice/{filename}`
 
-Download the generated invoice file:
-
-```bash
-https://your-domain.com/download-invoice/bulgarian_invoice_0000000002.docx
-```
+Download the generated Word invoice.
 
 ---
 
-## 🧾 Files
+## 🧪 Run tests
 
-- `main.py`: FastAPI routes
-- `process.py`: Core invoice logic
-- `suppliers.xlsx`: Supplier data (IBAN, VAT, contact)
-- `templates/`: Contains your Word template
-- `README.md`: This file 😊
+```bash
+pytest
+```
+
+Make sure you have all test dependencies from `requirements-dev.txt`.
+
+---
+
+## 📁 File Structure
+
+- `main.py`: FastAPI routing
+- `process.py`: Core invoice parsing and generation logic
+- `test_process.py`: Unit tests for critical functions
+- `suppliers.xlsx`: Supplier database
+- `templates/`: Contains your Word invoice template
+- `.gitignore`: Excludes virtual envs, logs, and temp files
+- `pytest.ini`: Pytest configuration
+- `requirements.txt`: Runtime dependencies
+- `requirements-dev.txt`: Dev/testing dependencies
 
 ---
 

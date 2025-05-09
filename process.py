@@ -52,9 +52,9 @@ def extract_customer_info(text):
         "RecipientCity": ""
     }
     vat_ids = re.findall(r"(BG\d{6,})", text)
-    ids = re.findall(r"(?<!BG)(\b\d{6,}\b)", text)
+    ids = re.findall(r"ID No[:]?\s*(\d{6,})", text)
+    names = re.findall(r"Customer Name:\s*([A-Za-z0-9 .,&-]+)", text)
     addresses = re.findall(r"Address:\s*(.*)", text)
-    names = re.findall(r"Customer Name:\s*(.*)", text)
 
     if names:
         customer["RecipientName"] = translate_text(names[0].strip())
@@ -67,6 +67,7 @@ def extract_customer_info(text):
     city_match = re.search(r"\b(Sofia|Varna|Burgas|Plovdiv)\b", text)
     if city_match:
         customer["RecipientCity"] = translate_text(city_match.group(1))
+
     return customer
 
 def number_to_bulgarian_words(amount):
@@ -129,12 +130,12 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
         invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
         invoice_date, invoice_date_bnb = extract_invoice_date(text)
 
-        total_match = re.search(r"Total Amount of Bill:.*?(\d+[.,]?\d+)", text)
+        total_match = re.search(r"Total Amount of Bill:\s*BGN\s*(\d+[.,]?\d+)", text)
         if not total_match:
-            total_match = re.search(r"Сума за плащане:.*?(\d+[.,]?\d+)", text)
+            total_match = re.search(r"Сума за плащане:\s*(\d+[.,]?\d+)", text)
         amount = float(total_match.group(1).replace(",", "")) if total_match else 0.0
 
-        vat_match = re.search(r"VAT Amount:.*?(\d+[.,]?\d+)", text)
+        vat_match = re.search(r"VAT Amount:\s*(\d+[.,]?\d+)", text)
         vat_amount = float(vat_match.group(1).replace(",", "")) if vat_match else 0.0
 
         currency_match = re.search(r"\b(USD|EUR|BGN|ILS|GBP)\b", text)

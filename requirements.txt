@@ -1,10 +1,10 @@
 fastapi
+pydantic
 uvicorn
-requests
 pandas
-openpyxl
-PyPDF2
 docxtpl
-python-multipart
-num2words
+PyPDF2
+requests
+openpyxl
+google-cloud-translate==2.0.1
 pytest

@@ -13,7 +13,8 @@ def test_translate_text():
 
 def test_number_to_bulgarian_words():
     assert number_to_bulgarian_words(5640) == "пет хиляди шестстотин и четиридесет лева"
-    assert number_to_bulgarian_words(700) == "седемстотин лева"
+    assert number_to_bulgarian_words(4700) == "четири хиляди ו… שבע מאות לева"  # תלוי בתרגום שלך
+    assert number_to_bulgarian_words(940) == "деветстотин и четиридесет лева"
     assert number_to_bulgarian_words(1) == "едно лева"
     assert number_to_bulgarian_words(0) == "0 лева"
 
@@ -42,3 +43,7 @@ def test_safe_extract_float():
     assert safe_extract_float("Total Amount: BGN 4 700.00") == 4700.0
     assert safe_extract_float("VAT Amount: BGN 940.00") == 940.0
     assert safe_extract_float("Total Amount of Bill: BGN 5 640.00") == 5640.0
+    assert safe_extract_float("Total Amount: BGN 4,700.00") == 4700.0
+    assert safe_extract_float("Total Amount: BGN4,700.00") == 4700.0
+    assert safe_extract_float("Amount: 1,000") == 1000.0
+    assert safe_extract_float("Amount: 1 000") == 1000.0

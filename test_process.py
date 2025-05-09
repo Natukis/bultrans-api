@@ -1,5 +1,5 @@
 import pytest
-from process_ready_for_deploy import (
+from process import (
     translate_text,
     extract_invoice_date,
     number_to_bulgarian_words,

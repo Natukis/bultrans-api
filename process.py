@@ -87,7 +87,6 @@ def fetch_exchange_rate(date_obj, currency_code):
     except Exception as e:
         log(f"Exchange rate fetch failed: {e}")
     return 1.0
-
 def extract_text_from_pdf(file_path):
     try:
         reader = PdfReader(file_path)
@@ -209,14 +208,14 @@ async def process_invoice_upload(supplier_id, file, template):
             "RecipientVAT": customer["RecipientVAT"],
             "RecipientAddress": auto_translate(customer["RecipientAddress"]),
             "RecipientCity": auto_translate(customer["RecipientCity"]),
-            "SupplierName": auto_translate(row["SupplierName"]),
+            "SupplierName": auto_translate(str(row["SupplierName"])),
             "SupplierCompanyID": str(row["SupplierCompanyID"]),
             "SupplierCompanyVAT": str(row["SupplierCompanyVAT"]),
-            "SupplierAddress": auto_translate(row["SupplierAddress"]),
-            "SupplierCity": auto_translate(row["SupplierCity"]),
+            "SupplierAddress": auto_translate(str(row["SupplierAddress"])),
+            "SupplierCity": auto_translate(str(row["SupplierCity"])),
             "SupplierContactPerson": auto_translate(str(row["SupplierContactPerson"])),
             "IBAN": row["IBAN"],
-            "BankName": auto_translate(row["Bankname"]),
+            "BankName": auto_translate(str(row["Bankname"])),
             "BankCode": row.get("BankCode", ""),
             "InvoiceNumber": invoice_number,
             "Date": date_str,

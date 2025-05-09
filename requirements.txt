@@ -7,3 +7,4 @@ PyPDF2
 docxtpl
 python-multipart
 num2words
+pytest

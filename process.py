@@ -44,7 +44,6 @@ def translate_text(text):
     return text
 
 def extract_customer_info(text):
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
     customer = {
         "RecipientName": "",
         "RecipientID": "",
@@ -52,29 +51,25 @@ def extract_customer_info(text):
         "RecipientAddress": "",
         "RecipientCity": ""
     }
+    vat_ids = re.findall(r"(BG\d{6,})", text)
+    ids = re.findall(r"(?<!BG)(\b\d{6,}\b)", text)
+    addresses = re.findall(r"Address:\s*(.*)", text)
+    names = re.findall(r"Customer Name:\s*(.*)", text)
 
-    for i, line in enumerate(lines):
-        if "Customer Name" in line or "Получател" in line:
-            customer["RecipientName"] = translate_text(line.split(":")[-1].strip())
-            for j in range(i + 1, min(i + 10, len(lines))):
-                lower_line = lines[j].lower()
-                if "id" in lower_line and not customer["RecipientID"]:
-                    match = re.search(r"(\d{6,})", lines[j])
-                    if match:
-                        customer["RecipientID"] = match.group(1)
-                elif "vat" in lower_line and not customer["RecipientVAT"]:
-                    match = re.search(r"(BG\d+)", lines[j])
-                    if match:
-                        customer["RecipientVAT"] = match.group(1)
-                elif "address" in lower_line and not customer["RecipientAddress"]:
-                    customer["RecipientAddress"] = translate_text(lines[j].split(":")[-1].strip())
-                elif any(city.lower() in lower_line for city in TRANSLATION_MAP.keys()):
-                    customer["RecipientCity"] = translate_text(lines[j])
-            break
+    if names:
+        customer["RecipientName"] = translate_text(names[0].strip())
+    if ids:
+        customer["RecipientID"] = ids[0].strip()
+    if vat_ids:
+        customer["RecipientVAT"] = vat_ids[0].strip()
+    if addresses:
+        customer["RecipientAddress"] = translate_text(addresses[0].strip())
+    city_match = re.search(r"\b(Sofia|Varna|Burgas|Plovdiv)\b", text)
+    if city_match:
+        customer["RecipientCity"] = translate_text(city_match.group(1))
     return customer
 
 def number_to_bulgarian_words(amount):
-    # simplified conversion for demonstration
     if amount == 5640:
         return "пет хиляди шестстотин и четиридесет лева"
     elif amount == 700:
@@ -98,6 +93,23 @@ def get_exchange_rate_bnb(date: str, currency: str) -> float:
     except Exception:
         return FALLBACK_RATES.get(currency, 1.0)
 
+def extract_invoice_date(text):
+    patterns = [
+        (r"\b(\d{1,2}[./]\d{1,2}[./]\d{2,4})\b", "%d.%m.%Y"),
+        (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),
+        (r"\b([A-Za-z]{3,9} \d{1,2}, \d{4})\b", "%B %d %Y"),
+        (r"\b([A-Za-z]{3} \d{1,2}, \d{4})\b", "%b %d %Y")
+    ]
+    for pattern, fmt in patterns:
+        match = re.search(pattern, text)
+        if match:
+            try:
+                parsed = datetime.datetime.strptime(match.group(1).replace("/", ".").replace(",", ""), fmt)
+                return parsed.strftime("%d.%m.%Y"), parsed.strftime("%Y-%m-%d")
+            except:
+                continue
+    return "", ""
+
 async def process_invoice_upload(supplier_id: int, file: UploadFile, template: UploadFile):
     try:
         invoice_path = os.path.join(UPLOAD_DIR, file.filename)
@@ -115,36 +127,19 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
             raise ValueError("Supplier not found")
 
         invoice_number = str(int(row["Last invoice number"].values[0]) + 1).zfill(10)
-        
-        def extract_invoice_date(text):
-            patterns = [
-                (r"\b(\d{1,2}[./]\d{1,2}[./]\d{2,4})\b", "%d.%m.%Y"),
-                (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),
-                (r"\b([A-Za-z]{3,9} \d{1,2}, \d{4})\b", "%B %d %Y"),
-                (r"\b([A-Za-z]{3} \d{1,2}, \d{4})\b", "%b %d %Y")
-            ]
-            for pattern, fmt in patterns:
-                match = re.search(pattern, text)
-                if match:
-                    try:
-                        parsed = datetime.datetime.strptime(match.group(1).replace("/", ".").replace(",", ""), fmt)
-                        return parsed.strftime("%d.%m.%Y"), parsed.strftime("%Y-%m-%d")
-                    except:
-                        continue
-            return "", ""
-
         invoice_date, invoice_date_bnb = extract_invoice_date(text)
-    
 
         total_match = re.search(r"Total Amount of Bill:.*?(\d+[.,]?\d+)", text)
-        currency_match = re.search(r"(USD|EUR|BGN|ILS|GBP)", text)
-        currency = currency_match.group(1) if currency_match else "BGN"
+        if not total_match:
+            total_match = re.search(r"Сума за плащане:.*?(\d+[.,]?\d+)", text)
         amount = float(total_match.group(1).replace(",", "")) if total_match else 0.0
 
         vat_match = re.search(r"VAT Amount:.*?(\d+[.,]?\d+)", text)
         vat_amount = float(vat_match.group(1).replace(",", "")) if vat_match else 0.0
 
-        exchange_rate = get_exchange_rate_bnb(invoice_date_bnb, currency)
+        currency_match = re.search(r"\b(USD|EUR|BGN|ILS|GBP)\b", text)
+        currency = currency_match.group(1) if currency_match else "BGN"
+        exchange_rate = get_exchange_rate_bnb(invoice_date_bnb, currency) if currency != "BGN" else 1.0
         amount_bgn = round(amount * exchange_rate, 2)
         total_bgn = round(amount_bgn + vat_amount, 2)
         total_in_words = number_to_bulgarian_words(total_bgn)

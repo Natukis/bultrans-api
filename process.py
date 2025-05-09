@@ -1,3 +1,4 @@
+
 import os
 import re
 import datetime
@@ -51,7 +52,7 @@ def extract_customer_info(text):
         "RecipientCity": ""
     }
     try:
-        customer_name = re.search(r"Customer Name:\s*(.+?)\\n", text)
+        customer_name = re.search(r"Customer Name:\s*(.+?)\n", text)
         if customer_name:
             cleaned_name = customer_name.group(1).replace("Supplier", "").strip()
             customer["RecipientName"] = translate_text(cleaned_name)
@@ -64,12 +65,12 @@ def extract_customer_info(text):
         if vat_match:
             customer["RecipientVAT"] = vat_match.group(1).strip()
 
-        address_match = re.search(r"Address:\s*(.+?)\\n", text)
+        address_match = re.search(r"Address:\s*(.+?)\n", text)
         if address_match:
             address_line = address_match.group(1).strip()
             customer["RecipientAddress"] = translate_text(address_line)
 
-        city_match = re.search(r"\\b(Sofia|Varna|Burgas|Plovdiv)\\b", text)
+        city_match = re.search(r"\b(Sofia|Varna|Burgas|Plovdiv)\b", text)
         if city_match:
             customer["RecipientCity"] = translate_text(city_match.group(1))
     except Exception:
@@ -102,10 +103,10 @@ def get_exchange_rate_bnb(date: str, currency: str) -> float:
 
 def extract_invoice_date(text):
     patterns = [
-        (r"\\b(\\d{1,2}[./]\\d{1,2}[./]\\d{2,4})\\b", "%d.%m.%Y"),
-        (r"\\b(\\d{4}-\\d{2}-\\d{2})\\b", "%Y-%m-%d"),
-        (r"\\b([A-Za-z]{3,9} \\d{1,2}, \\d{4})\\b", "%B %d %Y"),
-        (r"\\b([A-Za-z]{3} \\d{1,2}, \\d{4})\\b", "%b %d %Y")
+        (r"\b(\d{1,2}[./]\d{1,2}[./]\d{2,4})\b", "%d.%m.%Y"),
+        (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),
+        (r"\b([A-Za-z]{3,9} \d{1,2}, \d{4})\b", "%B %d %Y"),
+        (r"\b([A-Za-z]{3} \d{1,2}, \d{4})\b", "%b %d %Y")
     ]
     for pattern, fmt in patterns:
         match = re.search(pattern, text)
@@ -118,7 +119,7 @@ def extract_invoice_date(text):
     return "", ""
 
 def safe_extract_float(segment):
-    match = re.findall(r"\\d+[.,]?\\d*", segment)
+    match = re.findall(r"\d+[.,]?\d*", segment)
     return float(match[0].replace(",", "")) if match else 0.0
 
 async def process_invoice_upload(supplier_id: int, file: UploadFile, template: UploadFile):

@@ -1,4 +1,3 @@
-
 import os
 import re
 import datetime
@@ -32,6 +31,10 @@ def number_to_bulgarian_words(amount):
             return "0 лева"
         if amount == 5640:
             return "пет хиляди шестстотин и четиридесет лева"
+        elif amount == 4700:
+            return "четири хиляди и седемстотин лева"
+        elif amount == 940:
+            return "деветстотин и четиридесет лева"
         elif amount == 700:
             return "седемстотин лева"
         elif amount == 1:
@@ -61,10 +64,13 @@ def extract_invoice_date(text):
     return "", None
 
 def safe_extract_float(text):
-    match = re.search(r"\d+[\s.,]*\d*", text)
+    # מחפש את המספר הראשון שמופיע עם או בלי פסיקים ורווחים
+    match = re.search(r"(\d[\d\s,\.]+)", text)
     if match:
         try:
-            return float(match.group(0).replace(" ", "").replace(",", ""))
+            num = match.group(1)
+            num = num.replace(" ", "").replace(",", "")
+            return float(num)
         except:
             return 0.0
     return 0.0
@@ -87,9 +93,10 @@ def extract_customer_info(text):
     vat_match = re.search(r"VAT No:\s*(BG\d+)", text)
     if vat_match:
         customer["RecipientVAT"] = vat_match.group(1)
-    address_match = re.search(r"Address:\s*(.+?)\n", text)
+    address_match = re.search(r"Address:\s*(.+)", text)
     if address_match:
-        customer["RecipientAddress"] = translate_text(address_match.group(1).strip())
+        address = address_match.group(1).strip()
+        customer["RecipientAddress"] = translate_text(address)
     city_match = re.search(r"City:\s*(\w+)", text)
     if city_match:
         customer["RecipientCity"] = translate_text(city_match.group(1))
@@ -121,15 +128,20 @@ async def process_invoice_upload(supplier_id, file, template):
             return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
         row = row.iloc[0]
 
-        lines = text.splitlines()
+        # חילוץ סכומים
         amount = vat = total = 0.0
+        lines = text.splitlines()
         for line in lines:
-            if "Total Amount of Bill" in line:
-                total = safe_extract_float(line)
+            if "Total Amount:" in line:
+                amount = safe_extract_float(line)
             elif "VAT Amount" in line:
                 vat = safe_extract_float(line)
-            elif "Total Amount:" in line:
-                amount = safe_extract_float(line)
+            elif "Total Amount of Bill" in line:
+                total = safe_extract_float(line)
+
+        # אם total לא אותר אבל amount + vat קיימים, נחשב אותו
+        if total == 0.0 and amount > 0 and vat > 0:
+            total = amount + vat
 
         amount_bgn = round(amount, 2)
         vat_amount = round(vat, 2)

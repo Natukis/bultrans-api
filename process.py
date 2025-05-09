@@ -5,8 +5,7 @@ import pandas as pd
 import requests
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
-# num2words skipped actual usage due to no Bulgarian support
-# from num2words import num2words
+# Note: num2words not used here due to lack of full Bulgarian support
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
@@ -61,12 +60,10 @@ def extract_invoice_date(text):
     return "", None
 
 def safe_extract_float(text):
-    if "BGN" not in text:
-        return 0.0
-    match = re.search(r"([\d\s.,]+)", text)
+    match = re.search(r"\d+[\s.,]*\d*", text)
     if match:
         try:
-            return float(match.group(1).replace(" ", "").replace(",", ""))
+            return float(match.group(0).replace(" ", "").replace(",", ""))
         except:
             return 0.0
     return 0.0

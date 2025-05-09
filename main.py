@@ -6,10 +6,9 @@ import os
 
 app = FastAPI()
 
-# ✅ CORS middleware – מאפשר גישה מהדפדפן
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # תוכל להגביל בעתיד לדוגמה: ["https://yourfrontend.com"]
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -28,4 +27,4 @@ def download_invoice(filename: str):
     file_path = f"/tmp/{filename}"
     if os.path.exists(file_path):
         return FileResponse(path=file_path, filename=filename)
-    return JSONResponse({"error": "File not
+    return JSONResponse({"error": "File not found"}, status_code=404)

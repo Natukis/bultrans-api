@@ -9,6 +9,7 @@ from fastapi import UploadFile
 from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
+from num2words import num2words
 import traceback
 
 SUPPLIERS_PATH = "suppliers.xlsx"
@@ -78,11 +79,7 @@ def extract_customer_info(text):
     return customer
 
 def number_to_bulgarian_words(amount):
-    if amount == 5640:
-        return "пет хиляди шестстотин и четиридесет лева"
-    elif amount == 700:
-        return "седемстотин лева"
-    return f"{int(amount)} лева"
+    return num2words(int(amount), lang='bg') + " лева"
 
 def get_exchange_rate_bnb(date: str, currency: str) -> float:
     try:
@@ -103,10 +100,10 @@ def get_exchange_rate_bnb(date: str, currency: str) -> float:
 
 def extract_invoice_date(text):
     patterns = [
-        (r"\b(\d{1,2}[./]\d{1,2}[./]\d{2,4})\b", "%d.%m.%Y"),
-        (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),
-        (r"\b([A-Za-z]{3,9} \d{1,2}, \d{4})\b", "%B %d %Y"),
-        (r"\b([A-Za-z]{3} \d{1,2}, \d{4})\b", "%b %d %Y")
+        (r"(\d{1,2}[./]\d{1,2}[./]\d{2,4})", "%d.%m.%Y"),
+        (r"(\d{4}-\d{2}-\d{2})", "%Y-%m-%d"),
+        (r"([A-Za-z]{3,9} \d{1,2}, \d{4})", "%B %d %Y"),
+        (r"([A-Za-z]{3} \d{1,2}, \d{4})", "%b %d %Y")
     ]
     for pattern, fmt in patterns:
         match = re.search(pattern, text)
@@ -132,8 +129,10 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
             f.write(await template.read())
 
         reader = PdfReader(invoice_path)
-        text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-        text = text.replace("\n", " ")
+        text = "
+".join([page.extract_text() for page in reader.pages if page.extract_text()])
+        text = text.replace("
+", " ")
 
         suppliers = pd.read_excel(SUPPLIERS_PATH)
         row = suppliers[suppliers["SupplierCompanyID"] == supplier_id]
@@ -152,7 +151,7 @@ async def process_invoice_upload(supplier_id: int, file: UploadFile, template: U
         total_bgn = safe_extract_float(final_match.group(1)) if final_match else amount + vat_amount
         total_in_words = number_to_bulgarian_words(total_bgn)
 
-        currency_match = re.search(r"\b(USD|EUR|BGN|ILS|GBP)\b", text)
+        currency_match = re.search(r"(USD|EUR|BGN|ILS|GBP)", text)
         currency = currency_match.group(1) if currency_match else "BGN"
         exchange_rate = get_exchange_rate_bnb(invoice_date_bnb, currency) if currency != "BGN" else 1.0
         amount_bgn = round(amount * exchange_rate, 2)

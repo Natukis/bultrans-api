@@ -33,6 +33,6 @@ def download_invoice(filename: str):
     return JSONResponse({"error": "File not found"}, status_code=404)
 
 # ✅ בדיקת חיבור לשרת (פינג)
-@app.get("/process-invoice/")
+@app.get("/ping")
 def ping():
     return {"success": True, "message": "API is up and running"}

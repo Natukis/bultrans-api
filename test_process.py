@@ -1,5 +1,12 @@
+
 import pytest
-from process import translate_text, extract_invoice_date, number_to_bulgarian_words, extract_customer_info
+from process import (
+    translate_text,
+    extract_invoice_date,
+    number_to_bulgarian_words,
+    extract_customer_info,
+    safe_extract_float
+)
 
 def test_translate_text():
     assert translate_text("Sofia") == "София"
@@ -23,15 +30,15 @@ def test_extract_invoice_date():
 
 def test_extract_customer_info_mixed_text():
     sample_text = (
-        "Supplier: Banana Express EOOD\n"
-        "VAT No: BG206232541\n"
-        "ID: 206232541\n"
-        "Address: Business Park Varna, Building 8\n"
-        "\n"
         "Customer Name: QUESTE LTD Supplier\n"
         "ID No: 203743737\n"
         "VAT No: BG203743737\n"
-        "Address: Aleksandar Stamboliiski 134, Sofia"
+        "Address: Aleksandar Stamboliiski 134\n"
+        "City: Sofia\n"
+        "Supplier: Banana Express EOOD\n"
+        "VAT No: BG206232541\n"
+        "ID: 206232541\n"
+        "Address: Business Park Varna, Building 8"
     )
     result = extract_customer_info(sample_text)
     assert result["RecipientName"] == "Куесте ООД"
@@ -50,7 +57,6 @@ def test_total_amount_extraction():
         "VAT Amount: BGN 940.00\n"
         "Total Amount of Bill: BGN 5 640.00"
     )
-    from process import safe_extract_float
     lines = example_text.splitlines()
     values = [safe_extract_float(line) for line in lines]
     assert values == [4700.00, 940.00, 5640.00]

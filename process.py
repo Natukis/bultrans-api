@@ -64,7 +64,6 @@ def extract_invoice_date(text):
     return "", None
 
 def safe_extract_float(text):
-    # מחפש את המספר הראשון שמופיע עם או בלי פסיקים ורווחים
     match = re.search(r"(\d[\d\s,\.]+)", text)
     if match:
         try:
@@ -87,19 +86,24 @@ def extract_customer_info(text):
     if name_match:
         cleaned = name_match.group(1).replace("Supplier", "").strip()
         customer["RecipientName"] = translate_text(cleaned)
+
     id_match = re.search(r"ID No:\s*(\d+)", text)
     if id_match:
         customer["RecipientID"] = id_match.group(1)
+
     vat_match = re.search(r"VAT No:\s*(BG\d+)", text)
     if vat_match:
         customer["RecipientVAT"] = vat_match.group(1)
+
     address_match = re.search(r"Address:\s*(.+)", text)
     if address_match:
-        address = address_match.group(1).strip()
-        customer["RecipientAddress"] = translate_text(address)
-    city_match = re.search(r"City:\s*(\w+)", text)
+        customer["RecipientAddress"] = translate_text(address_match.group(1).strip())
+
+    # שליפת עיר גם אם אין "City:"
+    city_match = re.search(r"\b(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)\b", text)
     if city_match:
         customer["RecipientCity"] = translate_text(city_match.group(1))
+
     return customer
 
 async def process_invoice_upload(supplier_id, file, template):
@@ -139,7 +143,6 @@ async def process_invoice_upload(supplier_id, file, template):
             elif "Total Amount of Bill" in line:
                 total = safe_extract_float(line)
 
-        # אם total לא אותר אבל amount + vat קיימים, נחשב אותו
         if total == 0.0 and amount > 0 and vat > 0:
             total = amount + vat
 
@@ -149,6 +152,7 @@ async def process_invoice_upload(supplier_id, file, template):
 
         context = {
             **customer,
+            "RecipientName": translate_text(customer.get("RecipientName", "")),
             "SupplierName": translate_text(row["SupplierName"]),
             "SupplierCompanyID": str(row["SupplierCompanyID"]),
             "SupplierCompanyVAT": str(row["SupplierCompanyVAT"]),
@@ -161,10 +165,10 @@ async def process_invoice_upload(supplier_id, file, template):
             "InvoiceNumber": f"{int(row['Last invoice number']) + 1:08d}",
             "Date": date_str,
             "ServiceDescription": "Услуга по договор",
-            "Currency": "BGN",
+            "Cur": "BGN",
             "Amount": 1,
-            "ExchangeR": amount_bgn,
-            "AmountBG": amount_bgn,
+            "UnitPrice": amount_bgn,
+            "LineTotal": amount_bgn,
             "AmountBGN": amount_bgn,
             "VATAmount": vat_amount,
             "TotalBGN": total_bgn,

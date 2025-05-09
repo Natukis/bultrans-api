@@ -1,6 +1,8 @@
-
 # Development requirements
 pytest>=6.0
 ipython
 flake8
 black
+pytesseract
+pdf2image
+Pillow

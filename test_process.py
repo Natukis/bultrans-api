@@ -43,3 +43,14 @@ def test_extract_customer_info_mixed_text():
 def test_customer_name_cleaning():
     text = "Customer Name: QUESTE LTD Supplier"
     assert "Supplier" not in extract_customer_info(text)["RecipientName"]
+
+def test_total_amount_extraction():
+    example_text = (
+        "Total Amount: BGN 4 700.00\n"
+        "VAT Amount: BGN 940.00\n"
+        "Total Amount of Bill: BGN 5 640.00"
+    )
+    from process import safe_extract_float
+    lines = example_text.splitlines()
+    values = [safe_extract_float(line) for line in lines]
+    assert values == [4700.00, 940.00, 5640.00]

@@ -1,9 +1,19 @@
 from fastapi import FastAPI, UploadFile, Form
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from process import process_invoice_upload
 import os
 
 app = FastAPI()
+
+# ✅ CORS middleware – מאפשר גישה מהדפדפן
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # תוכל להגביל בעתיד לדוגמה: ["https://yourfrontend.com"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/process-invoice/")
 async def process_invoice(
@@ -18,4 +28,4 @@ def download_invoice(filename: str):
     file_path = f"/tmp/{filename}"
     if os.path.exists(file_path):
         return FileResponse(path=file_path, filename=filename)
-    return JSONResponse({"error": "File not found"}, status_code=404)
+    return JSONResponse({"error": "File not

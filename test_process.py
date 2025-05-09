@@ -1,7 +1,6 @@
 
 import pytest
-from datetime import datetime
-from process import translate_text, extract_invoice_date, number_to_bulgarian_words
+from process import translate_text, extract_invoice_date, number_to_bulgarian_words, extract_customer_info
 
 def test_translate_text():
     assert translate_text("Sofia") == "София"
@@ -14,7 +13,6 @@ def test_number_to_bulgarian_words():
     assert number_to_bulgarian_words(999) == "999 лева"
 
 def test_extract_invoice_date():
-    # Standard formats
     text1 = "Invoice date: 18/08/2021"
     text2 = "Date issued: 2021-08-18"
     text3 = "Dated: August 18, 2021"
@@ -24,8 +22,21 @@ def test_extract_invoice_date():
     assert extract_invoice_date(text3)[0] == "18.08.2021"
     assert extract_invoice_date(text4)[0] == "18.08.2021"
 
-def test_translate_edge_cases():
-    text = "Address: Aleksandar Stamboliiski, Sofia"
-    translated = translate_text(text)
-    assert "Александър Стамболийски" in translated
-    assert "София" in translated
+def test_extract_customer_info_mixed_text():
+    sample_text = '''
+    Supplier: Banana Express EOOD
+    VAT No: BG206232541
+    ID: 206232541
+    Address: Business Park Varna, Building 8
+
+    Customer Name: QUESTE LTD
+    ID No: 203743737
+    VAT No: BG203743737
+    Address: Aleksandar Stamboliiski 134, Sofia
+    '''
+    result = extract_customer_info(sample_text)
+    assert result["RecipientName"] == "Куесте ООД"
+    assert result["RecipientID"] == "203743737"
+    assert result["RecipientVAT"] == "BG203743737"
+    assert "Александър Стамболийски" in result["RecipientAddress"]
+    assert result["RecipientCity"] == "София"

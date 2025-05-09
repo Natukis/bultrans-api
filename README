@@ -1,104 +1,55 @@
+# BulTrans – תיקונים קריטיים שבוצעו
 
-# BulTrans – Bulgarian Invoice Converter 🇧🇬
-
-A FastAPI-based service that converts English PDF invoices into legally-compliant Bulgarian Word (.docx) invoices using a supplier database and exchange rates from BNB.bg.
-
----
-
-## ✅ Features
-
-- Extracts and translates customer name, ID, VAT, address, city
-- Differentiates supplier from customer automatically
-- Parses total amount and VAT (supports multiple formats)
-- Translates total amount into Bulgarian words
-- Uses official exchange rate from BNB.bg (with fallback)
-- Outputs a ready-to-sign Bulgarian Word invoice (.docx)
+להלן הסבר על התיקונים שבוצעו בקבצים `process.py` ו־`test_process.py`:
 
 ---
 
-## 📦 Installation
+## ✅ process.py – שינויים עיקריים
 
-### Clone the repo
-```bash
-git clone https://github.com/YOUR_USERNAME/bultrans-api.git
-cd bultrans-api
-```
+1. **ניקוי שם הלקוח:**
+   - הסרה של המילה "Supplier" אם מופיעה בשם הלקוח.
 
-### Create a virtual environment (recommended)
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-```
+2. **שיפור קליטת סכומים:**
+   - תוספת RegEx שתומכת בסכומים עם רווחים ונקודות (למשל: `4 700.00`).
+   - שליפה של שלושת הסכומים: סכום בסיס, מע"מ, וסכום סופי.
 
-### Install runtime dependencies
-```bash
-pip install -r requirements.txt
-```
+3. **המרה למילים בבולגרית:**
+   - תרגום הסכום הכולל לשם מילולי (למשל: `пет хиляди шестстотин и четиридесет лева`).
 
-### Install dev dependencies (for development, testing, formatting)
-```bash
-pip install -r requirements-dev.txt
-```
+4. **שיפור תיאור שירות:**
+   - חיפוש תאריך הסכם בשורת השירות, והוספתו אוטומטית:  
+     `Услуга по договор от 14.7.2021`.
 
----
+5. **תיקון סדר שדות CompanyID ו־VAT:**
+   - CompanyID בלי BG.
+   - VAT עם BG.
 
-## 🚀 Run the API locally
-
-```bash
-uvicorn main:app --reload
-```
-
-Then open: [http://localhost:8000/docs](http://localhost:8000/docs)
+6. **השלמה אוטומטית של שדות MOL ו-Съставил:**
+   - שימוש ב־`SupplierContactPerson` מטבלת הספקים.
 
 ---
 
-## 📬 API Endpoint
+## 🧪 test_process.py – בדיקות נוספות
 
-### `POST /process-invoice/`
-
-Form Data:
-- `supplier_id` (int): Must match `SupplierCompanyID` from `suppliers.xlsx`
-- `file`: English invoice in PDF format
-- `template`: Bulgarian Word invoice template (.docx)
-
-**Example cURL**
-```bash
-curl -X POST http://localhost:8000/process-invoice/ \
-  -F "supplier_id=206232541" \
-  -F "file=@Invoice.pdf" \
-  -F "template=@templates/BulTrans_Template_FinalFInal.docx"
-```
+1. **בדיקה לשם הלקוח (שאין בו "Supplier").**
+2. **בדיקות לאיתור סכומים לפי פורמט עם רווחים.**
+3. **בדיקת תקינות של תרגום שמות וכתובות.**
 
 ---
 
-### `GET /download-invoice/{filename}`
+## 📁 קבצים כלולים ב־ZIP
 
-Download the generated Word invoice.
-
----
-
-## 🧪 Run tests
-
-```bash
-pytest
-```
-
-Make sure you have all test dependencies from `requirements-dev.txt`.
+- `process.py` – קובץ הלוגיקה המעודכן.
+- `test_process.py` – קובץ בדיקות מעודכן.
 
 ---
 
-## 📁 File Structure
+## 🛠️ הוראות עדכון
 
-- `main.py`: FastAPI routing
-- `process.py`: Core invoice parsing and generation logic
-- `test_process.py`: Unit tests for critical functions
-- `suppliers.xlsx`: Supplier database
-- `templates/`: Contains your Word invoice template
-- `.gitignore`: Excludes virtual envs, logs, and temp files
-- `pytest.ini`: Pytest configuration
-- `requirements.txt`: Runtime dependencies
-- `requirements-dev.txt`: Dev/testing dependencies
+1. יש להעתיק את הקבצים לתיקיית הפרויקט.
+2. להריץ `pytest` ולוודא שכל הטסטים עוברים.
+3. להריץ את השירות מחדש (`uvicorn main:app --reload`).
 
 ---
 
-Made with ❤️ in Bulgaria 🇧🇬
+בהצלחה!

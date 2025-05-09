@@ -3,18 +3,21 @@ import re
 import datetime
 import pandas as pd
 import requests
+import pytesseract
+from pdf2image import convert_from_path
 from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 from xml.etree import ElementTree as ET
 from google.cloud import translate_v2 as translate
+from docx import Document
+from io import BytesIO
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# הגדרת המפתח של Google Translate API
-GOOGLE_API_KEY = "AIzaSyDLH_O0jJbcQJNR_tUfIX1YPkBf1sFx7ME"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 translator = translate.Client(api_key=GOOGLE_API_KEY)
 
 def auto_translate(text, target_lang="bg"):
@@ -40,8 +43,8 @@ def extract_invoice_date(text):
         r"(\d{2}/\d{2}/\d{4})",
         r"(\d{4}-\d{2}-\d{2})",
         r"(\d{2}\.\d{2}\.\d{4})",
-        r"(August \d{1,2}, \d{4})",
-        r"(Aug \d{1,2}, \d{4})"
+        r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})",
+        r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4})"
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -82,6 +85,25 @@ def fetch_exchange_rate(date_obj, currency_code):
     except:
         return 1.0
 
+def extract_text_from_pdf(file_path):
+    try:
+        reader = PdfReader(file_path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        if text.strip():
+            return text
+        # Fallback to OCR
+        images = convert_from_path(file_path)
+        return "\n".join(pytesseract.image_to_string(img) for img in images)
+    except:
+        return ""
+
+def extract_text_from_docx(file_path):
+    try:
+        doc = Document(file_path)
+        return "\n".join([para.text for para in doc.paragraphs])
+    except:
+        return ""
+
 def extract_customer_info(text):
     customer = {
         "RecipientName": "",
@@ -92,29 +114,21 @@ def extract_customer_info(text):
         "ServiceDescription": ""
     }
 
-    name_match = re.search(r"Customer Name:\s*(.+)", text)
-    if name_match:
-        customer["RecipientName"] = name_match.group(1).strip()
+    patterns = {
+        "RecipientName": [r"(Customer Name|Bill To|Invoice To):?\s*(.+)"],
+        "RecipientID": [r"(ID No|Tax ID|Identification Number):?\s*(\d+)"],
+        "RecipientVAT": [r"(VAT No|VAT|VAT ID|Tax Number):?\s*(BG\d+)"],
+        "RecipientAddress": [r"(Address|Billing Address):?\s*(.+)"],
+        "RecipientCity": [r"\b(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)\b"],
+        "ServiceDescription": [r"(Description|Service|Item):?\s*(.+)"]
+    }
 
-    id_match = re.search(r"ID No:\s*(\d+)", text)
-    if id_match:
-        customer["RecipientID"] = id_match.group(1)
-
-    vat_match = re.search(r"VAT No:\s*(BG\d+)", text)
-    if vat_match:
-        customer["RecipientVAT"] = vat_match.group(1)
-
-    address_match = re.search(r"Address:\s*(.+)", text)
-    if address_match:
-        customer["RecipientAddress"] = address_match.group(1).strip()
-
-    city_match = re.search(r"\b(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)\b", text)
-    if city_match:
-        customer["RecipientCity"] = city_match.group(1)
-
-    service_match = re.search(r"Description:\s*(.+)", text)
-    if service_match:
-        customer["ServiceDescription"] = service_match.group(1).strip()
+    for key, pats in patterns.items():
+        for pat in pats:
+            match = re.search(pat, text, re.IGNORECASE)
+            if match:
+                customer[key] = match.groups()[-1].strip()
+                break
 
     return customer
 
@@ -130,10 +144,11 @@ async def process_invoice_upload(supplier_id, file, template):
         with open(template_path, "wb") as f:
             f.write(template_contents)
 
-        reader = PdfReader(file_path)
         text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
+        if file.filename.endswith(".pdf"):
+            text = extract_text_from_pdf(file_path)
+        elif file.filename.endswith(".docx"):
+            text = extract_text_from_docx(file_path)
 
         customer = extract_customer_info(text)
         date_str, date_obj = extract_invoice_date(text)
@@ -156,11 +171,11 @@ async def process_invoice_upload(supplier_id, file, template):
 
         amount = vat = total = 0.0
         for line in text.splitlines():
-            if "Total Amount of Bill" in line:
+            if "Total Amount of Bill" in line or "Total" in line:
                 total = safe_extract_float(line)
-            elif "VAT Amount" in line or "VAT:" in line:
+            elif "VAT Amount" in line or "VAT" in line:
                 vat = safe_extract_float(line)
-            elif "Total Amount:" in line or "Amount:" in line:
+            elif "Subtotal" in line or "Amount" in line:
                 amount = safe_extract_float(line)
 
         if total == 0.0 and amount > 0 and vat > 0:
@@ -171,6 +186,10 @@ async def process_invoice_upload(supplier_id, file, template):
         amount_bgn = round(amount * exchange_rate, 2)
         vat_amount = round(vat * exchange_rate, 2)
         total_bgn = round(total * exchange_rate, 2)
+
+        invoice_number = f"{int(row['Last invoice number']) + 1:08d}"
+        df.at[row.name, "Last invoice number"] += 1
+        df.to_excel(SUPPLIERS_PATH, index=False)
 
         context = {
             "RecipientName": auto_translate(customer["RecipientName"]),
@@ -187,7 +206,7 @@ async def process_invoice_upload(supplier_id, file, template):
             "IBAN": row["IBAN"],
             "BankName": auto_translate(row["Bankname"]),
             "BankCode": row.get("BankCode", ""),
-            "InvoiceNumber": f"{int(row['Last invoice number']) + 1:08d}",
+            "InvoiceNumber": invoice_number,
             "Date": date_str,
             "ServiceDescription": auto_translate(customer["ServiceDescription"]) or "Услуга по договор",
             "Cur": "BGN",

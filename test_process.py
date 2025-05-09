@@ -16,7 +16,7 @@ def test_translate_text():
 def test_number_to_bulgarian_words():
     assert number_to_bulgarian_words(5640) == "пет хиляди шестстотин и четиридесет лева"
     assert number_to_bulgarian_words(700) == "седемстотин лева"
-    assert number_to_bulgarian_words(999) == "999 лева"
+    assert number_to_bulgarian_words(1) == "едно лева"
 
 def test_extract_invoice_date():
     text1 = "Invoice date: 18/08/2021"
@@ -30,14 +30,22 @@ def test_extract_invoice_date():
 
 def test_extract_customer_info_mixed_text():
     sample_text = (
-        "Customer Name: QUESTE LTD Supplier\n"
-        "ID No: 203743737\n"
-        "VAT No: BG203743737\n"
-        "Address: Aleksandar Stamboliiski 134\n"
-        "City: Sofia\n"
-        "Supplier: Banana Express EOOD\n"
-        "VAT No: BG206232541\n"
-        "ID: 206232541\n"
+        "Customer Name: QUESTE LTD Supplier
+"
+        "ID No: 203743737
+"
+        "VAT No: BG203743737
+"
+        "Address: Aleksandar Stamboliiski 134
+"
+        "City: Sofia
+"
+        "Supplier: Banana Express EOOD
+"
+        "VAT No: BG206232541
+"
+        "ID: 206232541
+"
         "Address: Business Park Varna, Building 8"
     )
     result = extract_customer_info(sample_text)
@@ -53,8 +61,10 @@ def test_customer_name_cleaning():
 
 def test_total_amount_extraction():
     example_text = (
-        "Total Amount: BGN 4 700.00\n"
-        "VAT Amount: BGN 940.00\n"
+        "Total Amount: BGN 4 700.00
+"
+        "VAT Amount: BGN 940.00
+"
         "Total Amount of Bill: BGN 5 640.00"
     )
     lines = example_text.splitlines()

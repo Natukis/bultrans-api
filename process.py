@@ -10,23 +10,27 @@ from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 from xml.etree import ElementTree as ET
 from docx import Document
+import traceback
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+def log(msg):
+    print(f"[BulTrans LOG] {msg}")
+
 def auto_translate(text, target_lang="bg"):
     if not text.strip():
         return text
-    api_key = os.getenv("GOOGLE_API_KEY")
-    url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
-    payload = {"q": text, "target": target_lang}
     try:
+        api_key = os.getenv("GOOGLE_API_KEY")
+        url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
+        payload = {"q": text, "target": target_lang}
         response = requests.post(url, json=payload)
         if response.status_code == 200:
             return response.json()["data"]["translations"][0]["translatedText"]
-    except:
-        pass
+    except Exception as e:
+        log(f"Translation failed: {e}")
     return text
 
 def number_to_bulgarian_words(amount):
@@ -62,8 +66,7 @@ def safe_extract_float(text):
     match = re.search(r"(\d[\d\s,.]+)", text)
     if match:
         try:
-            num = match.group(1)
-            num = num.replace(" ", "").replace(",", "")
+            num = match.group(1).replace(" ", "").replace(",", "")
             return float(num)
         except:
             return 0.0
@@ -81,9 +84,9 @@ def fetch_exchange_rate(date_obj, currency_code):
             if code == currency_code.upper():
                 rate = row.find("RATE").text
                 return float(rate.replace(",", "."))
-        return 1.0
-    except:
-        return 1.0
+    except Exception as e:
+        log(f"Exchange rate fetch failed: {e}")
+    return 1.0
 
 def extract_text_from_pdf(file_path):
     try:
@@ -93,14 +96,16 @@ def extract_text_from_pdf(file_path):
             return text
         images = convert_from_path(file_path)
         return "\n".join(pytesseract.image_to_string(img) for img in images)
-    except:
+    except Exception as e:
+        log(f"PDF text extraction failed: {e}")
         return ""
 
 def extract_text_from_docx(file_path):
     try:
         doc = Document(file_path)
         return "\n".join([para.text for para in doc.paragraphs])
-    except:
+    except Exception as e:
+        log(f"DOCX text extraction failed: {e}")
         return ""
 
 def extract_customer_info(text):
@@ -133,6 +138,7 @@ def extract_customer_info(text):
 
 async def process_invoice_upload(supplier_id, file, template):
     try:
+        log("Reading uploaded files...")
         contents = await file.read()
         template_contents = await template.read()
 
@@ -143,14 +149,20 @@ async def process_invoice_upload(supplier_id, file, template):
         with open(template_path, "wb") as f:
             f.write(template_contents)
 
-        text = ""
+        log(f"Extracting text from {file.filename}")
         if file.filename.endswith(".pdf"):
             text = extract_text_from_pdf(file_path)
         elif file.filename.endswith(".docx"):
             text = extract_text_from_docx(file_path)
+        else:
+            raise Exception("Unsupported file format")
 
+        log("Extracting customer info...")
         customer = extract_customer_info(text)
+        log(f"Customer info: {customer}")
+
         date_str, date_obj = extract_invoice_date(text)
+        log(f"Invoice date: {date_str}")
 
         df = pd.read_excel(SUPPLIERS_PATH)
         row = df[df["SupplierCompanyID"] == supplier_id]
@@ -167,6 +179,7 @@ async def process_invoice_upload(supplier_id, file, template):
         exchange_rate = 1.0
         if currency_code != "BGN":
             exchange_rate = fetch_exchange_rate(date_obj, currency_code)
+        log(f"Exchange rate for {currency_code}: {exchange_rate}")
 
         amount = vat = total = 0.0
         for line in text.splitlines():
@@ -222,17 +235,21 @@ async def process_invoice_upload(supplier_id, file, template):
             "CompiledBy": auto_translate(str(row["SupplierContactPerson"]))
         }
 
+        log(f"Rendering template with context: {context}")
         tpl = DocxTemplate(template_path)
         tpl.render(context)
         output_filename = f"bulgarian_invoice_{context['InvoiceNumber']}.docx"
         output_path = f"/tmp/{output_filename}"
         tpl.save(output_path)
 
+        log(f"Invoice saved to: {output_path}")
         return JSONResponse({
             "success": True,
             "invoice_number": context['InvoiceNumber'],
-            "file_path": output_path
+            "file_path": f"https://bultrans-api.onrender.com/download-invoice/{output_filename}"
         })
 
     except Exception as e:
+        log("EXCEPTION OCCURRED:")
+        log(traceback.format_exc())
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)

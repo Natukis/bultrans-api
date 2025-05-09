@@ -1,4 +1,3 @@
-
 import pytest
 from process import translate_text, extract_invoice_date, number_to_bulgarian_words, extract_customer_info
 
@@ -29,7 +28,7 @@ def test_extract_customer_info_mixed_text():
         "ID: 206232541\n"
         "Address: Business Park Varna, Building 8\n"
         "\n"
-        "Customer Name: QUESTE LTD\n"
+        "Customer Name: QUESTE LTD Supplier\n"
         "ID No: 203743737\n"
         "VAT No: BG203743737\n"
         "Address: Aleksandar Stamboliiski 134, Sofia"
@@ -40,3 +39,7 @@ def test_extract_customer_info_mixed_text():
     assert result["RecipientVAT"] == "BG203743737"
     assert "Александър Стамболийски" in result["RecipientAddress"]
     assert result["RecipientCity"] == "София"
+
+def test_customer_name_cleaning():
+    text = "Customer Name: QUESTE LTD Supplier"
+    assert "Supplier" not in extract_customer_info(text)["RecipientName"]

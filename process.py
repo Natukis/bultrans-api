@@ -1,11 +1,12 @@
+
 import os
 import re
 import datetime
 import pandas as pd
 import requests
+from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
-# Note: num2words not used here due to lack of full Bulgarian support
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 UPLOAD_DIR = "/tmp/uploads"
@@ -93,3 +94,85 @@ def extract_customer_info(text):
     if city_match:
         customer["RecipientCity"] = translate_text(city_match.group(1))
     return customer
+
+async def process_invoice_upload(supplier_id, file, template):
+    try:
+        contents = await file.read()
+        template_contents = await template.read()
+
+        file_path = f"/tmp/{file.filename}"
+        template_path = f"/tmp/{template.filename}"
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        with open(template_path, "wb") as f:
+            f.write(template_contents)
+
+        reader = PdfReader(file_path)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+
+        customer = extract_customer_info(text)
+        date_str, date_obj = extract_invoice_date(text)
+
+        df = pd.read_excel(SUPPLIERS_PATH)
+        row = df[df["SupplierCompanyID"] == supplier_id]
+        if row.empty:
+            return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
+        row = row.iloc[0]
+
+        lines = text.splitlines()
+        amount = vat = total = 0.0
+        for line in lines:
+            if "Total Amount of Bill" in line:
+                total = safe_extract_float(line)
+            elif "VAT Amount" in line:
+                vat = safe_extract_float(line)
+            elif "Total Amount:" in line:
+                amount = safe_extract_float(line)
+
+        amount_bgn = round(amount, 2)
+        vat_amount = round(vat, 2)
+        total_bgn = round(total, 2)
+
+        context = {
+            **customer,
+            "SupplierName": translate_text(row["SupplierName"]),
+            "SupplierCompanyID": str(row["SupplierCompanyID"]),
+            "SupplierCompanyVAT": str(row["SupplierCompanyVAT"]),
+            "SupplierAddress": translate_text(row["SupplierAddress"]),
+            "SupplierCity": translate_text(row["SupplierCity"]),
+            "SupplierContactPerson": translate_text(str(row["SupplierContactPerson"])),
+            "IBAN": row["IBAN"],
+            "BankName": translate_text(row["Bankname"]),
+            "BankCode": row.get("BankCode", ""),
+            "InvoiceNumber": f"{int(row['Last invoice number']) + 1:08d}",
+            "Date": date_str,
+            "ServiceDescription": "Услуга по договор",
+            "Currency": "BGN",
+            "Amount": 1,
+            "ExchangeR": amount_bgn,
+            "AmountBG": amount_bgn,
+            "AmountBGN": amount_bgn,
+            "VATAmount": vat_amount,
+            "TotalBGN": total_bgn,
+            "TotalInWords": number_to_bulgarian_words(total_bgn),
+            "TransactionCountry": "България",
+            "TransactionBasis": "По сметка",
+            "CompiledBy": translate_text(str(row["SupplierContactPerson"]))
+        }
+
+        tpl = DocxTemplate(template_path)
+        tpl.render(context)
+        output_filename = f"bulgarian_invoice_{context['InvoiceNumber']}.docx"
+        output_path = f"/tmp/{output_filename}"
+        tpl.save(output_path)
+
+        return JSONResponse({
+            "success": True,
+            "invoice_number": context['InvoiceNumber'],
+            "file_path": output_path
+        })
+
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)

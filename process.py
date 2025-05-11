@@ -19,7 +19,7 @@ from googleapiclient.http import MediaFileUpload
 SUPPLIERS_PATH = "suppliers.xlsx"
 TEMPLATE_PATH = "BulTrans_Template_FinalFInal.docx"
 UPLOAD_DIR = "/tmp/uploads"
-SERVICE_ACCOUNT_FILE = "proven-entropy-459314-f8-aa22b23505c4.json"
+from tempfile import NamedTemporaryFile
 DRIVE_FOLDER_ID = "1JUTWRpBGKemiH6x89lHbV7b5J53fud3V"
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -145,8 +145,15 @@ def extract_customer_info(text):
     return customer
 
 def get_drive_service():
-    credentials = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE,
+    creds_json = os.getenv("GOOGLE_CREDS_JSON")
+    if not creds_json:
+        raise ValueError("Missing GOOGLE_CREDS_JSON")
+
+    with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as temp_file:
+        temp_file.write(creds_json)
+        temp_file.flush()
+        credentials = service_account.Credentials.from_service_account_file(
+            temp_file.name,
         scopes=["https://www.googleapis.com/auth/drive"]
     )
     return build("drive", "v3", credentials=credentials)

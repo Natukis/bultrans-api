@@ -12,9 +12,16 @@ from xml.etree import ElementTree as ET
 from docx import Document
 import traceback
 
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
 SUPPLIERS_PATH = "suppliers.xlsx"
 TEMPLATE_PATH = "BulTrans_Template_FinalFInal.docx"
 UPLOAD_DIR = "/tmp/uploads"
+SERVICE_ACCOUNT_FILE = "proven-entropy-459314-f8-aa22b23505c4.json"
+DRIVE_FOLDER_ID = "1JUTWRpBGKemiH6x89lHbV7b5J53fud3V"
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def log(msg):
@@ -137,6 +144,27 @@ def extract_customer_info(text):
 
     return customer
 
+def get_drive_service():
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    return build("drive", "v3", credentials=credentials)
+
+def upload_to_drive(local_path, filename):
+    service = get_drive_service()
+    file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
+    media = MediaFileUpload(local_path, resumable=True)
+    uploaded_file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+
+    # Make the file publicly accessible
+    service.permissions().create(
+        fileId=uploaded_file["id"],
+        body={"type": "anyone", "role": "reader"},
+    ).execute()
+
+    return f"https://drive.google.com/file/d/{uploaded_file['id']}/view?usp=sharing"
+
 async def process_invoice_upload(supplier_id, file):
     try:
         log("Reading uploaded file...")
@@ -238,12 +266,14 @@ async def process_invoice_upload(supplier_id, file):
         output_path = f"/tmp/{output_filename}"
         tpl.save(output_path)
 
-        log(f"Invoice saved to: {output_path}")
+        log(f"Uploading to Google Drive: {output_path}")
+        drive_link = upload_to_drive(output_path, output_filename)
+
         return JSONResponse({
             "success": True,
             "data": {
                 "invoice_number": context['InvoiceNumber'],
-                "file_path": f"https://bultrans-api.onrender.com/download-invoice/{output_filename}"
+                "drive_link": drive_link
             }
         })
 

@@ -1,4 +1,3 @@
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -6,6 +5,12 @@ __pycache__/
 
 # C extensions
 *.so
+
+# Virtual environment
+.venv/
+env/
+venv/
+ENV/
 
 # Distribution / packaging
 .Python
@@ -24,21 +29,60 @@ var/
 .installed.cfg
 *.egg
 
-# Virtual environments
-venv/
-ENV/
-env/
-.venv/
-.env
+# PyInstaller
+*.manifest
+*.spec
 
-# Pytest cache
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 .pytest_cache/
 
-# Logs
-*.log
+# Translations
+*.mo
+*.pot
 
-# VS Code settings
+# Django stuff
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff
+instance/
+.webassets-cache
+
+# Scrapy stuff
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Pyre type checker
+.pyre/
+
+# VS Code
 .vscode/
 
 # MacOS
 .DS_Store
+
+# Secret JSON key (very important!)
+proven-entropy-459314-f8-aa22b23505c4.json

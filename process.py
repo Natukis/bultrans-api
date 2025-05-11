@@ -13,6 +13,7 @@ from docx import Document
 import traceback
 
 SUPPLIERS_PATH = "suppliers.xlsx"
+TEMPLATE_PATH = "BulTrans_Template_FinalFInal.docx"
 UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -136,30 +137,28 @@ def extract_customer_info(text):
 
     return customer
 
-async def process_invoice_upload(supplier_id, file, template):
+async def process_invoice_upload(supplier_id, file):
     try:
-        log("Reading uploaded files...")
+        log("Reading uploaded file...")
         contents = await file.read()
-        template_contents = await template.read()
-
         file_path = f"/tmp/{file.filename}"
-        template_path = f"/tmp/{template.filename}"
         with open(file_path, "wb") as f:
             f.write(contents)
-        with open(template_path, "wb") as f:
-            f.write(template_contents)
 
         log(f"Extracting text from {file.filename}")
-        if file.filename.endswith(".pdf"):
-            text = extract_text_from_pdf(file_path)
-        elif file.filename.endswith(".docx"):
-            text = extract_text_from_docx(file_path)
-        else:
-            raise Exception("Unsupported file format")
+        text = extract_text_from_pdf(file_path) if file.filename.endswith(".pdf") else extract_text_from_docx(file_path)
 
         log("Extracting customer info...")
         customer = extract_customer_info(text)
         log(f"Customer info: {customer}")
+
+        required_fields = ["RecipientName", "RecipientID", "RecipientVAT", "RecipientAddress", "RecipientCity"]
+        missing_fields = [f for f in required_fields if not customer.get(f)]
+        if missing_fields:
+            return JSONResponse({
+                "success": False,
+                "error": f"Missing required fields in invoice: {', '.join(missing_fields)}"
+            }, status_code=400)
 
         date_str, date_obj = extract_invoice_date(text)
         log(f"Invoice date: {date_str}")
@@ -176,9 +175,7 @@ async def process_invoice_upload(supplier_id, file, template):
                 currency_code = curr
                 break
 
-        exchange_rate = 1.0
-        if currency_code != "BGN":
-            exchange_rate = fetch_exchange_rate(date_obj, currency_code)
+        exchange_rate = fetch_exchange_rate(date_obj, currency_code) if currency_code != "BGN" else 1.0
         log(f"Exchange rate for {currency_code}: {exchange_rate}")
 
         amount = vat = total = 0.0
@@ -231,12 +228,11 @@ async def process_invoice_upload(supplier_id, file, template):
             "ExchangeRate": exchange_rate,
             "TotalInWords": number_to_bulgarian_words(total_bgn),
             "TransactionCountry": "България",
-            "TransactionBasis": "По сметка",
-            "CompiledBy": auto_translate(str(row["SupplierContactPerson"]))
+            "TransactionBasis": "По сметка"
         }
 
         log(f"Rendering template with context: {context}")
-        tpl = DocxTemplate(template_path)
+        tpl = DocxTemplate(TEMPLATE_PATH)
         tpl.render(context)
         output_filename = f"bulgarian_invoice_{context['InvoiceNumber']}.docx"
         output_path = f"/tmp/{output_filename}"

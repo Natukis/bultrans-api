@@ -19,10 +19,9 @@ app.add_middleware(
 @app.post("/process-invoice/")
 async def process_invoice(
     supplier_id: str = Form(...),
-    file: UploadFile = Form(...),
-    template: UploadFile = Form(...)
+    file: UploadFile = Form(...)
 ):
-    return await process_invoice_upload(supplier_id, file, template)
+    return await process_invoice_upload(supplier_id, file)
 
 # ✅ הורדת קובץ מוכן
 @app.get("/download-invoice/{filename}")

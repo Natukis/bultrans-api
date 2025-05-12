@@ -11,21 +11,20 @@ from PyPDF2 import PdfReader
 from xml.etree import ElementTree as ET
 from docx import Document
 import traceback
-
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from tempfile import NamedTemporaryFile
 
 SUPPLIERS_PATH = "suppliers.xlsx"
 TEMPLATE_PATH = "BulTrans_Template_FinalFInal.docx"
 UPLOAD_DIR = "/tmp/uploads"
-from tempfile import NamedTemporaryFile
 DRIVE_FOLDER_ID = "1JUTWRpBGKemiH6x89lHbV7b5J53fud3V"
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def log(msg):
-    print(f"[BulTrans LOG] {msg}")
+    print(f"[BulTrans LOG] {msg}", flush=True)
 
 def auto_translate(text, target_lang="bg"):
     if not text.strip():
@@ -154,38 +153,40 @@ def get_drive_service():
         temp_file.flush()
         credentials = service_account.Credentials.from_service_account_file(
             temp_file.name,
-        scopes=["https://www.googleapis.com/auth/drive"]
-    )
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
     return build("drive", "v3", credentials=credentials)
 
 def upload_to_drive(local_path, filename):
+    log("🔼 Uploading file to Google Drive...")
     service = get_drive_service()
     file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
     media = MediaFileUpload(local_path, resumable=True)
     uploaded_file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
 
-    # Make the file publicly accessible
     service.permissions().create(
         fileId=uploaded_file["id"],
         body={"type": "anyone", "role": "reader"},
     ).execute()
 
-    return f"https://drive.google.com/file/d/{uploaded_file['id']}/view?usp=sharing"
+    link = f"https://drive.google.com/file/d/{uploaded_file['id']}/view?usp=sharing"
+    log(f"✅ File uploaded to Drive: {link}")
+    return link
 
 async def process_invoice_upload(supplier_id, file):
     try:
-        log("Reading uploaded file...")
+        log("🚀 Starting invoice processing...")
         contents = await file.read()
         file_path = f"/tmp/{file.filename}"
         with open(file_path, "wb") as f:
             f.write(contents)
+        log(f"📄 File saved: {file_path}")
 
-        log(f"Extracting text from {file.filename}")
         text = extract_text_from_pdf(file_path) if file.filename.endswith(".pdf") else extract_text_from_docx(file_path)
+        log("🔍 Text extracted from invoice.")
 
-        log("Extracting customer info...")
         customer = extract_customer_info(text)
-        log(f"Customer info: {customer}")
+        log(f"👤 Customer info: {customer}")
 
         required_fields = ["RecipientName", "RecipientID", "RecipientVAT", "RecipientAddress", "RecipientCity"]
         missing_fields = [f for f in required_fields if not customer.get(f)]
@@ -196,7 +197,7 @@ async def process_invoice_upload(supplier_id, file):
             }, status_code=400)
 
         date_str, date_obj = extract_invoice_date(text)
-        log(f"Invoice date: {date_str}")
+        log(f"📆 Invoice date: {date_str}")
 
         df = pd.read_excel(SUPPLIERS_PATH)
         row = df[df["SupplierCompanyID"] == int(supplier_id)]
@@ -209,9 +210,10 @@ async def process_invoice_upload(supplier_id, file):
             if curr in text:
                 currency_code = curr
                 break
+        log(f"💱 Detected currency: {currency_code}")
 
         exchange_rate = fetch_exchange_rate(date_obj, currency_code) if currency_code != "BGN" else 1.0
-        log(f"Exchange rate for {currency_code}: {exchange_rate}")
+        log(f"📈 Exchange rate: {exchange_rate}")
 
         amount = vat = total = 0.0
         for line in text.splitlines():
@@ -266,16 +268,17 @@ async def process_invoice_upload(supplier_id, file):
             "TransactionBasis": "По сметка"
         }
 
-        log(f"Rendering template with context: {context}")
+        log(f"🧾 Rendering Word document...")
         tpl = DocxTemplate(TEMPLATE_PATH)
         tpl.render(context)
         output_filename = f"bulgarian_invoice_{context['InvoiceNumber']}.docx"
         output_path = f"/tmp/{output_filename}"
         tpl.save(output_path)
 
-        log(f"Uploading to Google Drive: {output_path}")
+        log(f"📤 Uploading to Drive...")
         drive_link = upload_to_drive(output_path, output_filename)
 
+        log("✅ Invoice processing completed.")
         return JSONResponse({
             "success": True,
             "data": {
@@ -285,6 +288,6 @@ async def process_invoice_upload(supplier_id, file):
         })
 
     except Exception as e:
-        log("EXCEPTION OCCURRED:")
+        log("❌ EXCEPTION OCCURRED:")
         log(traceback.format_exc())
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)

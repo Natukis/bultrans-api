@@ -152,8 +152,11 @@ def extract_customer_info(text):
                 customer["RecipientVAT"] = match.group(0)
         elif re.search(r"(?i)(Address|Billing Address)", line):
             customer["RecipientAddress"] = line.split(":")[-1].strip()
-        elif re.search(r"(?i)(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)", line):
-            customer["RecipientCity"] = line.strip()
+        elif re.search(r"(?i)(City|Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)", line):
+            if ':' in line:
+                customer["RecipientCity"] = line.split(':', 1)[1].strip()
+            else:
+                customer["RecipientCity"] = line.strip()
 
     return customer
 

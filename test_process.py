@@ -33,11 +33,12 @@ def test_extract_customer_info():
         "City: Sofia"
     )
     result = extract_customer_info(text)
-    assert result["RecipientName"] == "QUESTE LTD Supplier"
+    assert result["RecipientName"] == "QUESTE LTD"  # מוסר את "Supplier"
     assert result["RecipientID"] == "203743737"
     assert result["RecipientVAT"] == "BG203743737"
     assert result["RecipientAddress"] == "Aleksandar Stamboliiski 134"
     assert result["RecipientCity"] == "Sofia"
+    assert isinstance(result["ServiceDescription"], str)
 
 def test_safe_extract_float():
     assert safe_extract_float("Total Amount: BGN 4 700.00") == 4700.0

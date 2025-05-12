@@ -5,6 +5,7 @@ import pandas as pd
 import requests
 import pytesseract
 from pdf2image import convert_from_path
+from fastapi import UploadFile
 from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
@@ -119,7 +120,7 @@ def clean_recipient_name(line):
     return re.sub(r"(?i)(Supplier|Доставчик)", "", line).strip()
 
 def extract_service_description(lines):
-    for line in lines[::-1]:
+    for line in reversed(lines):
         if len(line) > 20 and not re.search(r"(?i)(Quantity|Total|Amount|VAT|Net|Общо)", line):
             return line.strip()
     return ""
@@ -137,11 +138,10 @@ def extract_customer_info(text):
 
     for line in lines:
         if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
-           if ':' in line:
-    customer["RecipientName"] = clean_recipient_name(line.split(':', 1)[1])
-else:
-    customer["RecipientName"] = clean_recipient_name(line)
-
+            if ':' in line:
+                customer["RecipientName"] = clean_recipient_name(line.split(':', 1)[1])
+            else:
+                customer["RecipientName"] = clean_recipient_name(line)
         elif re.search(r"(?i)(ID No|Tax ID|Identification Number)", line):
             match = re.search(r"\d+", line)
             if match:
@@ -157,8 +157,24 @@ else:
 
     return customer
 
-# המשך פונקציית process_invoice_upload
-from fastapi import UploadFile
+def get_drive_service():
+    creds_json = os.getenv("GOOGLE_CREDS_JSON")
+    if not creds_json:
+        raise ValueError("Missing GOOGLE_CREDS_JSON")
+    with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as temp_file:
+        temp_file.write(creds_json)
+        temp_file.flush()
+        credentials = service_account.Credentials.from_service_account_file(temp_file.name, scopes=["https://www.googleapis.com/auth/drive"])
+    return build("drive", "v3", credentials=credentials)
+
+def upload_to_drive(local_path, filename):
+    log("🔼 Uploading file to Google Drive...")
+    service = get_drive_service()
+    file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
+    media = MediaFileUpload(local_path, resumable=True)
+    uploaded_file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    service.permissions().create(fileId=uploaded_file["id"], body={"type": "anyone", "role": "reader"}).execute()
+    return f"https://drive.google.com/file/d/{uploaded_file['id']}/view?usp=sharing"
 
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     try:
@@ -249,26 +265,11 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         output_path = f"/tmp/{output_filename}"
         tpl.save(output_path)
 
-        service = get_drive_service()
-        file_metadata = {"name": output_filename, "parents": [DRIVE_FOLDER_ID]}
-        media = MediaFileUpload(output_path, resumable=True)
-        uploaded_file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-        service.permissions().create(fileId=uploaded_file["id"], body={"type": "anyone", "role": "reader"}).execute()
-        link = f"https://drive.google.com/file/d/{uploaded_file['id']}/view?usp=sharing"
+        drive_link = upload_to_drive(output_path, output_filename)
 
-        return JSONResponse({"success": True, "data": {"invoice_number": context['InvoiceNumber'], "drive_link": link}})
+        return JSONResponse({"success": True, "data": {"invoice_number": context['InvoiceNumber'], "drive_link": drive_link}})
 
     except Exception as e:
         log("❌ EXCEPTION OCCURRED:")
         log(traceback.format_exc())
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-
-def get_drive_service():
-    creds_json = os.getenv("GOOGLE_CREDS_JSON")
-    if not creds_json:
-        raise ValueError("Missing GOOGLE_CREDS_JSON")
-    with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as temp_file:
-        temp_file.write(creds_json)
-        temp_file.flush()
-        credentials = service_account.Credentials.from_service_account_file(temp_file.name, scopes=["https://www.googleapis.com/auth/drive"])
-    return build("drive", "v3", credentials=credentials)

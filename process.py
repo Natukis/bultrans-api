@@ -115,89 +115,67 @@ def extract_text_from_docx(file_path):
         log(f"DOCX text extraction failed: {e}")
         return ""
 
+def clean_recipient_name(line):
+    return re.sub(r"(?i)(Supplier|Доставчик)", "", line).strip()
+
+def extract_service_description(lines):
+    for line in lines[::-1]:
+        if len(line) > 20 and not re.search(r"(?i)(Quantity|Total|Amount|VAT|Net|Общо)", line):
+            return line.strip()
+    return ""
+
 def extract_customer_info(text):
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
     customer = {
         "RecipientName": "",
         "RecipientID": "",
         "RecipientVAT": "",
         "RecipientAddress": "",
         "RecipientCity": "",
-        "ServiceDescription": ""
+        "ServiceDescription": extract_service_description(lines)
     }
 
-    patterns = {
-        "RecipientName": [r"(Customer Name|Bill To|Invoice To):?\s*(.+)"],
-        "RecipientID": [r"(ID No|Tax ID|Identification Number):?\s*(\d+)"],
-        "RecipientVAT": [r"(VAT No|VAT|VAT ID|Tax Number):?\s*(BG\d+)"],
-        "RecipientAddress": [r"(Address|Billing Address):?\s*(.+)"],
-        "RecipientCity": [r"\b(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)\b"],
-        "ServiceDescription": [r"(Description|Service|Item):?\s*(.+)"]
-    }
-
-    for key, pats in patterns.items():
-        for pat in pats:
-            match = re.search(pat, text, re.IGNORECASE)
+    for line in lines:
+        if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
+            customer["RecipientName"] = clean_recipient_name(line)
+        elif re.search(r"(?i)(ID No|Tax ID|Identification Number)", line):
+            match = re.search(r"\d+", line)
             if match:
-                customer[key] = match.groups()[-1].strip()
-                break
+                customer["RecipientID"] = match.group(0)
+        elif re.search(r"(?i)(VAT No|VAT|VAT ID|Tax Number)", line):
+            match = re.search(r"BG\d+", line)
+            if match:
+                customer["RecipientVAT"] = match.group(0)
+        elif re.search(r"(?i)(Address|Billing Address)", line):
+            customer["RecipientAddress"] = line.split(":")[-1].strip()
+        elif re.search(r"(?i)(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)", line):
+            customer["RecipientCity"] = line.strip()
 
     return customer
 
-def get_drive_service():
-    creds_json = os.getenv("GOOGLE_CREDS_JSON")
-    if not creds_json:
-        raise ValueError("Missing GOOGLE_CREDS_JSON")
+# המשך פונקציית process_invoice_upload
+from fastapi import UploadFile
 
-    with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as temp_file:
-        temp_file.write(creds_json)
-        temp_file.flush()
-        credentials = service_account.Credentials.from_service_account_file(
-            temp_file.name,
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-    return build("drive", "v3", credentials=credentials)
-
-def upload_to_drive(local_path, filename):
-    log("🔼 Uploading file to Google Drive...")
-    service = get_drive_service()
-    file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
-    media = MediaFileUpload(local_path, resumable=True)
-    uploaded_file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-
-    service.permissions().create(
-        fileId=uploaded_file["id"],
-        body={"type": "anyone", "role": "reader"},
-    ).execute()
-
-    link = f"https://drive.google.com/file/d/{uploaded_file['id']}/view?usp=sharing"
-    log(f"✅ File uploaded to Drive: {link}")
-    return link
-
-async def process_invoice_upload(supplier_id, file):
+async def process_invoice_upload(supplier_id: str, file: UploadFile):
     try:
         log("🚀 Starting invoice processing...")
         contents = await file.read()
         file_path = f"/tmp/{file.filename}"
         with open(file_path, "wb") as f:
             f.write(contents)
-        log(f"📄 File saved: {file_path}")
 
         text = extract_text_from_pdf(file_path) if file.filename.endswith(".pdf") else extract_text_from_docx(file_path)
-        log("🔍 Text extracted from invoice.")
-
+        lines = text.splitlines()
         customer = extract_customer_info(text)
-        log(f"👤 Customer info: {customer}")
 
         required_fields = ["RecipientName", "RecipientID", "RecipientVAT", "RecipientAddress", "RecipientCity"]
         missing_fields = [f for f in required_fields if not customer.get(f)]
         if missing_fields:
-            return JSONResponse({
-                "success": False,
-                "error": f"Missing required fields in invoice: {', '.join(missing_fields)}"
-            }, status_code=400)
+            return JSONResponse({"success": False, "error": f"Missing required fields in invoice: {', '.join(missing_fields)}"}, status_code=400)
 
         date_str, date_obj = extract_invoice_date(text)
-        log(f"📆 Invoice date: {date_str}")
+        if not date_obj:
+            return JSONResponse({"success": False, "error": "Invoice date not found or unrecognized format"}, status_code=400)
 
         df = pd.read_excel(SUPPLIERS_PATH)
         row = df[df["SupplierCompanyID"] == int(supplier_id)]
@@ -205,23 +183,16 @@ async def process_invoice_upload(supplier_id, file):
             return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
         row = row.iloc[0]
 
-        currency_code = "EUR"
-        for curr in ["USD", "EUR", "GBP", "ILS", "BGN"]:
-            if curr in text:
-                currency_code = curr
-                break
-        log(f"💱 Detected currency: {currency_code}")
-
+        currency_code = next((curr for curr in ["USD", "EUR", "GBP", "ILS", "BGN"] if curr in text), "EUR")
         exchange_rate = fetch_exchange_rate(date_obj, currency_code) if currency_code != "BGN" else 1.0
-        log(f"📈 Exchange rate: {exchange_rate}")
 
         amount = vat = total = 0.0
-        for line in text.splitlines():
-            if "Total Amount of Bill" in line or "Total" in line:
+        for line in reversed(lines):
+            if re.search(r"(?i)(Total Amount|Общо)", line):
                 total = safe_extract_float(line)
-            elif "VAT Amount" in line or "VAT" in line:
+            elif re.search(r"(?i)(VAT|ДДС)", line):
                 vat = safe_extract_float(line)
-            elif "Subtotal" in line or "Amount" in line:
+            elif re.search(r"(?i)(Net|Amount|Subtotal)", line):
                 amount = safe_extract_float(line)
 
         if total == 0.0 and amount > 0 and vat > 0:
@@ -254,7 +225,7 @@ async def process_invoice_upload(supplier_id, file):
             "BankCode": row.get("BankCode", ""),
             "InvoiceNumber": invoice_number,
             "Date": date_str,
-            "ServiceDescription": auto_translate(customer["ServiceDescription"]) or "Услуга по договор",
+            "ServiceDescription": auto_translate(customer["ServiceDescription"] or "Услуга по договор"),
             "Cur": "BGN",
             "Amount": 1,
             "UnitPrice": amount_bgn,
@@ -268,26 +239,32 @@ async def process_invoice_upload(supplier_id, file):
             "TransactionBasis": "По сметка"
         }
 
-        log(f"🧾 Rendering Word document...")
         tpl = DocxTemplate(TEMPLATE_PATH)
         tpl.render(context)
         output_filename = f"bulgarian_invoice_{context['InvoiceNumber']}.docx"
         output_path = f"/tmp/{output_filename}"
         tpl.save(output_path)
 
-        log(f"📤 Uploading to Drive...")
-        drive_link = upload_to_drive(output_path, output_filename)
+        service = get_drive_service()
+        file_metadata = {"name": output_filename, "parents": [DRIVE_FOLDER_ID]}
+        media = MediaFileUpload(output_path, resumable=True)
+        uploaded_file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+        service.permissions().create(fileId=uploaded_file["id"], body={"type": "anyone", "role": "reader"}).execute()
+        link = f"https://drive.google.com/file/d/{uploaded_file['id']}/view?usp=sharing"
 
-        log("✅ Invoice processing completed.")
-        return JSONResponse({
-            "success": True,
-            "data": {
-                "invoice_number": context['InvoiceNumber'],
-                "drive_link": drive_link
-            }
-        })
+        return JSONResponse({"success": True, "data": {"invoice_number": context['InvoiceNumber'], "drive_link": link}})
 
     except Exception as e:
         log("❌ EXCEPTION OCCURRED:")
         log(traceback.format_exc())
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+def get_drive_service():
+    creds_json = os.getenv("GOOGLE_CREDS_JSON")
+    if not creds_json:
+        raise ValueError("Missing GOOGLE_CREDS_JSON")
+    with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as temp_file:
+        temp_file.write(creds_json)
+        temp_file.flush()
+        credentials = service_account.Credentials.from_service_account_file(temp_file.name, scopes=["https://www.googleapis.com/auth/drive"])
+    return build("drive", "v3", credentials=credentials)

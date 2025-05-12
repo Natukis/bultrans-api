@@ -121,7 +121,7 @@ def clean_recipient_name(line):
 
 def extract_service_description(lines):
     for line in reversed(lines):
-        if len(line) > 20 and not re.search(r"(?i)(Quantity|Total|Amount|VAT|Net|Общо)", line):
+        if len(line) > 20 and not re.search(r"(?i)(Quantity|Total|Amount|VAT|Net|Общо|Bank|IBAN|Account|Invoice|номер)", line):
             return line.strip()
     return ""
 
@@ -139,9 +139,9 @@ def extract_customer_info(text):
     for line in lines:
         if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
             if ':' in line:
-                customer["RecipientName"] = clean_recipient_name(line.split(':', 1)[1])
-            else:
-                customer["RecipientName"] = clean_recipient_name(line)
+                value = line.split(':', 1)[1].strip()
+                if 'Supplier' not in value and 'Доставчик' not in value:
+                    customer["RecipientName"] = clean_recipient_name(value)
         elif re.search(r"(?i)(ID No|Tax ID|Identification Number)", line):
             match = re.search(r"\d+", line)
             if match:
@@ -210,13 +210,23 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         exchange_rate = fetch_exchange_rate(date_obj, currency_code) if currency_code != "BGN" else 1.0
 
         amount = vat = total = 0.0
-        for line in reversed(lines):
-            if re.search(r"(?i)(Total Amount|Общо)", line):
-                total = safe_extract_float(line)
-            elif re.search(r"(?i)(VAT|ДДС)", line):
-                vat = safe_extract_float(line)
-            elif re.search(r"(?i)(Net|Amount|Subtotal)", line):
-                amount = safe_extract_float(line)
+        previous_line = ""
+        for line in lines:
+            if re.search(r"(?i)Total Amount of Bill", line):
+                previous_line = "total"
+            elif re.search(r"(?i)VAT Amount", line):
+                previous_line = "vat"
+            elif re.search(r"(?i)Subtotal|Amount", line):
+                previous_line = "amount"
+            elif re.search(r"(?i)\d+[\d\s,.]*", line):
+                value = safe_extract_float(line)
+                if previous_line == "total" and value > 0:
+                    total = value
+                elif previous_line == "vat" and value > 0:
+                    vat = value
+                elif previous_line == "amount" and value > 0:
+                    amount = value
+                previous_line = ""
 
         if total == 0.0 and amount > 0 and vat > 0:
             total = amount + vat

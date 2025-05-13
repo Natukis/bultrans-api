@@ -227,7 +227,7 @@ def extract_customer_info(text, supplier_name=""):
     log(f"📅 Extracted service date: {service_date}")
 
     if service_date:
-        service_translated = f"м.{service_date}"
+        service_translated = f"{auto_translate(service_line)} от м.{service_date}"
     else:
         service_translated = auto_translate(service_line)
 

@@ -168,7 +168,8 @@ def fetch_exchange_rate(date_obj, currency_code):
         log(f"Exchange rate fetch failed: {e}")
     return 1.0
 
-def extract_customer_info(text):
+supplier_name = str(row["SupplierName"])
+customer = extract_customer_info(text, supplier_name)
     lines = [l.strip() for l in text.splitlines() if l.strip()]
 
     service_line = extract_service_line(lines)
@@ -193,15 +194,28 @@ def extract_customer_info(text):
         "ServiceDescription": service_translated
     }
 
+    supplier_name_lower = supplier_name.lower()
+
     for line in lines:
         for eng, bg in known_countries.items():
             if eng.lower() in line.lower():
                 customer["RecipientCountry"] = bg
 
-        if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
+        if re.search(r"(?i)(Customer Name|Bill To|Invoice To|Client)", line):
             raw_name = line.split(":", 1)[-1].strip()
-            if "Banana Express" not in raw_name:
-                customer["RecipientName"] = clean_recipient_name(raw_name)
+
+            # הסר את שם הספק מהשורה אם קיים
+            if supplier_name_lower in raw_name.lower():
+                raw_name = raw_name.lower().replace(supplier_name_lower, "").strip()
+
+            # חתוך לפי מילים כלליות שיכולות להופיע אחרי שם הלקוח
+            for stop_word in ["Supplier", "Vendor", "Company", "Firm"]:
+                if stop_word.lower() in raw_name.lower():
+                    raw_name = raw_name.split(stop_word)[0].strip()
+
+            raw_name = clean_recipient_name(raw_name)
+            if raw_name:
+                customer["RecipientName"] = auto_translate(raw_name)
 
         elif re.search(r"(?i)(ID No|Tax ID)", line):
             m = re.search(r"\d+", line)
@@ -219,9 +233,6 @@ def extract_customer_info(text):
         elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
             val = line.split(":", 1)[-1].strip() if ":" in line else line.strip()
             customer["RecipientCity"] = auto_translate(val)
-
-    if customer["RecipientName"]:
-        customer["RecipientName"] = auto_translate(customer["RecipientName"])
 
     return customer
 

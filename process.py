@@ -134,8 +134,8 @@ def extract_service_line(lines):
 
 def extract_date_from_service(service_line):
     patterns = [
-        r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}",  # תואם גם 14.7.2021 וגם 14.07.2021
-        r"(м\.?\s?[А-Яа-я]+\s?20\d{2})"      # תואם גם "м.Март 2025"
+        r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}",  # לדוגמה: 14.7.2021
+        r"(м\.?\s?[А-Яа-я]+\s?20\d{2})"      # לדוגמה: м.Март 2025
     ]
     bg_months = {
         1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
@@ -149,7 +149,6 @@ def extract_date_from_service(service_line):
                 dt = datetime.datetime.strptime(raw, "%d.%m.%Y")
                 return f"{bg_months[dt.month]} {dt.year}"
             except:
-                # במקרה של "м.Март 2025" או משהו דומה – מחזיר אותו כמו שהוא
                 return match.group(0).replace("м.", "").strip().capitalize()
     return None
 
@@ -227,17 +226,13 @@ def extract_customer_info(text, supplier_name=""):
     service_date = extract_date_from_service(service_line)
     log(f"📅 Extracted service date: {service_date}")
 
-def extract_customer_info(text, supplier_name=""):
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    service_line = extract_service_line(lines)
-    service_date = extract_date_from_service(service_line)
-    log(f"📅 Extracted service date: {service_date}")
-
     if service_date:
+        # אם השירות כבר מכיל את החודש והשנה – תרגום רגיל
         if service_date in service_line:
             service_translated = auto_translate(service_line)
         else:
-            service_translated = f"{auto_translate(service_line)} от {service_date}"
+            # מוסיפים את התאריך במילים עם "м." לפי התקן
+            service_translated = f"{auto_translate(service_line)} м.{service_date}"
     else:
         service_translated = auto_translate(service_line)
 

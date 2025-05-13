@@ -142,6 +142,14 @@ def extract_date_from_service(service_line):
     return None
 
 def safe_extract_float(text):
+    match = re.search(r"(\d[\d\s,.]+)", text)
+    if match:
+        try:
+            num = match.group(1).replace(" ", "").replace(",", "")
+            return float(num)
+        except:
+            return 0.0
+    return 0.0
 
 def extract_amount(text):
     for line in text.splitlines()[::-1]:  # עובר מהסוף להתחלה
@@ -150,6 +158,7 @@ def extract_amount(text):
             if val > 0:
                 return val
     return 0.0
+
 
     match = re.search(r"(\d[\d\s,.]+)", text)
     if match:

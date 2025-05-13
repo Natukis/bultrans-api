@@ -225,7 +225,7 @@ def extract_customer_info(text, supplier_name=""):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     service_line = extract_service_line(lines)
     service_date = extract_date_from_service(service_line)
-log(f"📅 Extracted service date: {service_date}")
+    log(f"📅 Extracted service date: {service_date}")
 
 def extract_customer_info(text, supplier_name=""):
     ...

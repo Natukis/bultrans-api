@@ -346,3 +346,4 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         log("❌ EXCEPTION OCCURRED:")
         log(traceback.format_exc())
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+   # trigger CI

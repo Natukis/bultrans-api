@@ -168,8 +168,7 @@ def fetch_exchange_rate(date_obj, currency_code):
         log(f"Exchange rate fetch failed: {e}")
     return 1.0
 
-supplier_name = str(row["SupplierName"])
-customer = extract_customer_info(text, supplier_name)
+def extract_customer_info(text, supplier_name=""):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
 
     service_line = extract_service_line(lines)
@@ -204,11 +203,9 @@ customer = extract_customer_info(text, supplier_name)
         if re.search(r"(?i)(Customer Name|Bill To|Invoice To|Client)", line):
             raw_name = line.split(":", 1)[-1].strip()
 
-            # הסר את שם הספק מהשורה אם קיים
             if supplier_name_lower in raw_name.lower():
                 raw_name = raw_name.lower().replace(supplier_name_lower, "").strip()
 
-            # חתוך לפי מילים כלליות שיכולות להופיע אחרי שם הלקוח
             for stop_word in ["Supplier", "Vendor", "Company", "Firm"]:
                 if stop_word.lower() in raw_name.lower():
                     raw_name = raw_name.split(stop_word)[0].strip()

@@ -143,7 +143,7 @@ def extract_date_from_service(service_line):
 
 def safe_extract_float(text):
 
-    def extract_amount(text):
+def extract_amount(text):
     for line in text.splitlines()[::-1]:  # עובר מהסוף להתחלה
         if re.search(r"(?i)(total|subtotal|amount due|grand total)", line):
             val = safe_extract_float(line)

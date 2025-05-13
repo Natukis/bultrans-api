@@ -170,10 +170,14 @@ def extract_amount(text):
     return 0.0
 
 def extract_currency_code(text):
-    for curr in ["EUR", "USD", "ILS", "BGN", "GBP"]:
-        if curr in text:
-            return curr
-    return "EUR"
+    # מנסה לזהות את המטבע רק מהשורות שמכילות סכומים
+    lines = text.splitlines()
+    for line in lines:
+        if re.search(r"\b\d+[.,]?\d*\s*(BGN|EUR|USD|ILS|GBP)\b", line):
+            match = re.search(r"(BGN|EUR|USD|ILS|GBP)", line)
+            if match:
+                return match.group(1)
+    return "EUR"  # ברירת מחדל אם לא נמצא שום מטבע ברור
 
 def extract_quantity(text):
     match = re.search(r"(\d+(?:\.\d+)?)(?=\s*(EUR|USD|ILS|BGN|GBP))", text)
@@ -304,6 +308,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             date_obj = datetime.datetime.today()
             date_str = date_obj.strftime("%d.%m.%Y")
         currency_code = extract_currency_code(text)
+        log(f"🔎 Detected currency: {currency_code}")
         amount = extract_amount(text)  # זה הסכום המקורי מהחשבונית
         unit_price = extract_unit_price(currency_code, date_obj)
         line_total = round(amount * unit_price, 2)

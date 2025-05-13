@@ -226,11 +226,10 @@ def extract_customer_info(text, supplier_name=""):
     service_date = extract_date_from_service(service_line)
     log(f"📅 Extracted service date: {service_date}")
 
-if service_date:
-    service_translated = f"м.{service_date}"
-else:
-    service_translated = auto_translate(service_line)
-
+    if service_date:
+        service_translated = f"м.{service_date}"
+    else:
+        service_translated = auto_translate(service_line)
 
     customer = {
         "RecipientName": "",
@@ -277,9 +276,9 @@ else:
             if raw_country:
                 customer["RecipientCountry"] = auto_translate(raw_country)
 
-    # אם לא זוהתה מדינה בכלל, הגדר ברירת מחדל
     if not customer["RecipientCountry"]:
         customer["RecipientCountry"] = "България"
+
     return customer
 
 def get_drive_service():

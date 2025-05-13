@@ -1,5 +1,3 @@
-# ✅ BulTrans – process.py – גרסה מלאה עם כל התיקונים (שם לקוח, סכומים, תיאור שירות, שער, מטבע, מילים, כמות)
-
 import os
 import re
 import datetime
@@ -31,7 +29,8 @@ def log(msg):
     print(f"[BulTrans LOG] {msg}", flush=True)
 
 def auto_translate(text, target_lang="bg"):
-    if not text.strip(): return text
+    if not text.strip():
+        return text
     try:
         api_key = os.getenv("GOOGLE_API_KEY")
         url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
@@ -43,30 +42,32 @@ def auto_translate(text, target_lang="bg"):
         log(f"Translation failed: {e}")
     return text
 
-def number_to_bulgarian_words(amount):
+def number_to_bulgarian_words(amount, as_words=False):
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
-        word_map = {
-            0: "нула", 1: "един", 2: "два", 3: "три", 4: "четири", 5: "пет",
-            6: "шест", 7: "седем", 8: "осем", 9: "девет"
-        }
-        leva_words = f"{leva} лв."
-        if leva in word_map:
-            leva_words = f"{word_map[leva]} лева"
+        if as_words:
+            word_map = {
+                0: "нула", 1: "един", 2: "два", 3: "три", 4: "четири", 5: "пет",
+                6: "шест", 7: "седем", 8: "осем", 9: "девет"
+            }
+            leva_words = f"{word_map.get(leva, leva)} лева"
+        else:
+            leva_words = f"{leva} лв."
         if stotinki > 0:
             return f"{leva_words} и {stotinki:02d} ст."
         return leva_words
     except:
         return ""
 
+
 def extract_invoice_date(text):
     patterns = [
         r"(\d{2}/\d{2}/\d{4})",
         r"(\d{4}-\d{2}-\d{2})",
         r"(\d{2}\.\d{2}\.\d{4})",
-        r"(\b(?:January|February|...|December) \d{1,2}, \d{4})",
-        r"(\b(?:Jan|Feb|...|Dec) \d{1,2}, \d{4})"
+        r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})",
+        r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4})"
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -79,6 +80,9 @@ def extract_invoice_date(text):
                 except:
                     continue
     return "", None
+
+# המשך יישלח מיד...
+
 
 def extract_date_from_service(service_line):
     match = re.search(r"(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})", service_line)
@@ -147,6 +151,7 @@ def extract_unit_price(currency_code, date_obj):
         return 1.0
     return fetch_exchange_rate(date_obj, currency_code)
 
+
 def fetch_exchange_rate(date_obj, currency_code):
     try:
         url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml&search=true&date={date_obj.strftime('%d.%m.%Y')}"
@@ -212,6 +217,7 @@ def upload_to_drive(local_path, filename):
     service.permissions().create(fileId=uploaded_file["id"], body={"type": "anyone", "role": "reader"}).execute()
     return f"https://drive.google.com/file/d/{uploaded_file['id']}/view"
 
+
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     try:
@@ -273,7 +279,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "VATAmount": vat_amount,
             "TotalBGN": total_bgn,
             "ExchangeRate": unit_price,
-            "TotalInWords": number_to_bulgarian_words(total_bgn),
+            "TotalInWords": number_to_bulgarian_words(total_bgn, as_words=True),
             "TransactionCountry": "България",
             "TransactionBasis": "По сметка"
         }

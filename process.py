@@ -159,10 +159,19 @@ def extract_date_from_service(service_line):
     return None
 
 def build_service_description(service_line, invoice_date):
-    service_line_translated = auto_translate(service_line)
+    import re
+    # הסרה של מספרים כמו "1 ", "1." וכו' מההתחלה
+    service_line_cleaned = re.sub(r"^\s*\d+[\.\)]?\s*", "", service_line)
+
+    # תרגום
+    service_line_translated = auto_translate(service_line_cleaned).strip()
+
+    # הסרת 'от' בסוף כדי למנוע כפילות
+    service_line_translated = re.sub(r"\bот\b[,\.]?\s*$", "", service_line_translated, flags=re.IGNORECASE).strip()
+
+    # תאריך מהשורה
     service_month = extract_date_from_service(service_line)
 
-    # אם לא נמצא תאריך בתוך השירות – נ fallback לתאריך החשבונית
     if not service_month and invoice_date:
         bg_months = {
             1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
@@ -171,9 +180,10 @@ def build_service_description(service_line, invoice_date):
         service_month = f"{bg_months[invoice_date.month]} {invoice_date.year}"
 
     if service_month:
-        return f"{service_line_translated}, от м.{service_month}"
+        return f"{service_line_translated} от м.{service_month}"
     else:
         return service_line_translated
+
 
 def safe_extract_float(text):
     match = re.search(r"(\d[\d\s,.]+)", text)

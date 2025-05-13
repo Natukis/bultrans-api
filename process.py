@@ -113,13 +113,10 @@ def extract_text_from_docx(file_path):
         log(f"DOCX text extraction failed: {e}")
         return ""
 
-def clean_recipient_name(line):
-    keywords = ["Supplier", "Customer", "Client"]
-    for word in keywords:
-        line = re.sub(rf"(?i)\b{word}\b", "", line)  # מילה עצמאית
-        line = re.sub(rf"(?i)\s+{word}", "", line)   # מילה צמודה עם רווח
-        line = re.sub(rf"(?i){word}$", "", line)     # אם מופיעה בסוף
-    return ' '.join(line.split()).strip()
+def def clean_recipient_name(line):
+    # הסר מילים לא רלוונטיות משם הלקוח
+    line = line.replace("Supplier", "").replace("Customer", "").replace("Client", "")
+    return ' '.join(line.strip().split())
 
 def extract_service_line(lines):
     for line in lines:
@@ -196,10 +193,10 @@ def extract_customer_info(text):
                 customer["RecipientCountry"] = bg
 
         # שם הלקוח
-        if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
-            raw_name = line.split(":", 1)[-1].strip()
-            if "Banana Express" not in raw_name:  # לוודא שזה לא הספק
-                customer["RecipientName"] = raw_name
+       if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
+    raw_name = line.split(":", 1)[-1].strip()
+    if "Banana Express" not in raw_name:  # לוודא שזה לא הספק
+        customer["RecipientName"] = clean_recipient_name(raw_name)
 
         elif re.search(r"(?i)(ID No|Tax ID)", line):
             m = re.search(r"\d+", line)

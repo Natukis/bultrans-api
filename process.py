@@ -140,8 +140,7 @@ def extract_customer_info(text):
         if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
             if ':' in line:
                 value = line.split(':', 1)[1].strip()
-                if 'Supplier' not in value and 'Доставчик' not in value:
-                    customer["RecipientName"] = clean_recipient_name(value)
+                customer["RecipientName"] = clean_recipient_name(value)
         elif re.search(r"(?i)(ID No|Tax ID|Identification Number)", line):
             match = re.search(r"\d+", line)
             if match:

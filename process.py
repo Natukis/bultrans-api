@@ -132,14 +132,26 @@ def extract_service_line(lines):
     return ""
 
 def extract_date_from_service(service_line):
-    match = re.search(r"(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})", service_line)
-    if match:
-        try:
-            dt = datetime.datetime.strptime(match.group(1).replace('/', '.').replace('-', '.'), "%d.%m.%Y")
-            return dt.strftime("%B %Y")
-        except:
-            return None
+    patterns = [
+        r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}",  # תואם גם 14.7.2021 וגם 14.07.2021
+        r"(м\.?\s?[А-Яа-я]+\s?20\d{2})"      # תואם גם "м.Март 2025"
+    ]
+    bg_months = {
+        1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
+        7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"
+    }
+    for pattern in patterns:
+        match = re.search(pattern, service_line)
+        if match:
+            raw = match.group(0).replace('/', '.').replace('-', '.')
+            try:
+                dt = datetime.datetime.strptime(raw, "%d.%m.%Y")
+                return f"{bg_months[dt.month]} {dt.year}"
+            except:
+                # במקרה של "м.Март 2025" או משהו דומה – מחזיר אותו כמו שהוא
+                return match.group(0).replace("м.", "").strip().capitalize()
     return None
+
 
 def safe_extract_float(text):
     match = re.search(r"(\d[\d\s,.]+)", text)

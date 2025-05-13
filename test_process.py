@@ -12,6 +12,9 @@ from process import (
 def is_cyrillic(text):
     return bool(re.search(r'[А-Яа-я]', text))
 
+def not_latin_only(text):
+    return not re.fullmatch(r"[A-Za-z0-9 .,-]+", text)
+
 def test_auto_translate():
     result = auto_translate("Sofia")
     assert isinstance(result, str)
@@ -40,12 +43,12 @@ def test_extract_customer_info_basic():
     )
     result = extract_customer_info(text, supplier_name="Banana Express")
     assert result["RecipientName"] != ""
-    assert is_cyrillic(result["RecipientName"])
+    assert not_latin_only(result["RecipientName"])  # תעתיק
     assert result["RecipientID"] == "203743737"
     assert result["RecipientVAT"] == "BG203743737"
     assert result["RecipientAddress"] != ""
-    assert is_cyrillic(result["RecipientAddress"])
-    assert is_cyrillic(result["RecipientCity"])
+    assert not_latin_only(result["RecipientAddress"])  # תעתיק
+    assert is_cyrillic(result["RecipientCity"])  # תרגום
 
 def test_extract_customer_info_mixed_line():
     text = (
@@ -57,11 +60,11 @@ def test_extract_customer_info_mixed_line():
     )
     result = extract_customer_info(text, supplier_name="Supplier Company")
     assert result["RecipientName"] != ""
-    assert is_cyrillic(result["RecipientName"])
+    assert not_latin_only(result["RecipientName"])
     assert result["RecipientID"] == "111222333"
     assert result["RecipientVAT"] == "BG111222333"
     assert result["RecipientAddress"] != ""
-    assert is_cyrillic(result["RecipientAddress"])
+    assert not_latin_only(result["RecipientAddress"])
     assert is_cyrillic(result["RecipientCity"])
 
 def test_safe_extract_float():

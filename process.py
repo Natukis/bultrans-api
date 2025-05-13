@@ -265,7 +265,6 @@ else:
     # אם לא זוהתה מדינה בכלל, הגדר ברירת מחדל
     if not customer["RecipientCountry"]:
         customer["RecipientCountry"] = "България"
-
     return customer
 
 def get_drive_service():

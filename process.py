@@ -194,33 +194,27 @@ def extract_customer_info(text, supplier_name=""):
     if service_date:
         service_translated += f" от {auto_translate(service_date)}"
 
-    known_countries = {
-        "Bulgaria": "България",
-        "UK": "Обединеното кралство",
-        "USA": "САЩ"
-    }
-
     customer = {
         "RecipientName": "",
         "RecipientID": "",
         "RecipientVAT": "",
         "RecipientAddress": "",
         "RecipientCity": "",
-        "RecipientCountry": "България",
+        "RecipientCountry": "",
         "ServiceDescription": service_translated
     }
 
     for line in lines:
-        for eng, bg in known_countries.items():
-            if eng.lower() in line.lower():
-                customer["RecipientCountry"] = bg
-
         if re.search(r"(?i)(Customer Name|Bill To|Invoice To|Client)", line):
-            raw_name = line.split(":", 1)[-1].strip()
-            raw_name = re.sub(r"(?i)supplier|vendor|company|firm", "", raw_name)
-            raw_name = clean_recipient_name(raw_name)
-            if raw_name:
-                customer["RecipientName"] = transliterate_to_bulgarian(raw_name)
+            parts = line.split(":", 2)
+            if len(parts) >= 2:
+                raw_name = parts[1].split(":")[0].strip()
+                pattern = re.compile(re.escape(supplier_name), re.IGNORECASE)
+                raw_name = pattern.sub("", raw_name).strip()
+                raw_name = re.sub(r"(?i)supplier|vendor|company|firm", "", raw_name)
+                raw_name = clean_recipient_name(raw_name)
+                if raw_name:
+                    customer["RecipientName"] = transliterate_to_bulgarian(raw_name)
 
         elif re.search(r"(?i)(ID No|Tax ID)", line):
             m = re.search(r"\d+", line)
@@ -239,6 +233,15 @@ def extract_customer_info(text, supplier_name=""):
         elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
             val = line.split(":", 1)[-1].strip() if ":" in line else line.strip()
             customer["RecipientCity"] = auto_translate(val)
+
+        elif re.search(r"(?i)(Country|Location)", line):
+            raw_country = line.split(":", 1)[-1].strip()
+            if raw_country:
+                customer["RecipientCountry"] = auto_translate(raw_country)
+
+    # אם לא זוהתה מדינה בכלל, הגדר ברירת מחדל
+    if not customer["RecipientCountry"]:
+        customer["RecipientCountry"] = "България"
 
     return customer
 

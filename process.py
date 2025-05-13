@@ -164,7 +164,7 @@ def extract_customer_info(text):
             m = re.search(r"BG\d+", line)
             if m: customer["RecipientVAT"] = m.group(0)
         elif re.search(r"(?i)(Address|Billing Address)", line):
-            customer["RecipientAddress"] = auto_translate(line.split(":")[-1])
+            customer["RecipientAddress"] = auto_translate(line.split(":")[-1].strip())
         elif re.search(r"(?i)(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora)", line):
             customer["RecipientCity"] = auto_translate(line.strip())
         elif "Bulgaria" in line:

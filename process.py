@@ -212,9 +212,10 @@ def extract_customer_info(text, supplier_name=""):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     service_line = extract_service_line(lines)
     service_date = extract_date_from_service(service_line)
-    service_translated = auto_translate(service_line)
     if service_date:
-        service_translated += f" от {auto_translate(service_date)}"
+    service_translated = f"{auto_translate(service_line)} от {auto_translate(service_date)}"
+else:
+    service_translated = auto_translate(service_line)
 
     customer = {
         "RecipientName": "",

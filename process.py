@@ -1,3 +1,5 @@
+# ✅ גרסה מלאה של process.py למערכת BulTrans – כולל הכל מההתחלה עד הסוף
+
 import os
 import re
 import datetime
@@ -122,6 +124,54 @@ def safe_extract_float(text):
             return 0.0
     return 0.0
 
+def extract_customer_info(text):
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    service_line = extract_service_line(lines)
+    service_date = extract_date_from_service(service_line)
+    service_translated = auto_translate(service_line)
+    if service_date:
+        service_translated += f" от {auto_translate(service_date)}"
+
+    known_countries = {
+        "Bulgaria": "България",
+        "United Kingdom": "Обединеното кралство",
+        "UK": "Обединеното кралство",
+        "Israel": "Израел",
+        "USA": "САЩ",
+        "Germany": "Германия"
+    }
+
+    customer = {
+        "RecipientName": "",
+        "RecipientID": "",
+        "RecipientVAT": "",
+        "RecipientAddress": "",
+        "RecipientCity": "",
+        "RecipientCountry": "България",
+        "ServiceDescription": service_translated
+    }
+
+    for line in lines:
+        for eng, bg in known_countries.items():
+            if eng.lower() in line.lower():
+                customer["RecipientCountry"] = bg
+
+        if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
+            customer["RecipientName"] = clean_recipient_name(line.split(":")[-1])
+        elif re.search(r"(?i)(ID No|Tax ID)", line):
+            m = re.search(r"\d+", line)
+            if m: customer["RecipientID"] = m.group(0)
+        elif re.search(r"(?i)(VAT|VAT No)", line):
+            m = re.search(r"BG\d+", line)
+            if m: customer["RecipientVAT"] = m.group(0)
+        elif re.search(r"(?i)(Address|Billing Address)", line):
+            customer["RecipientAddress"] = auto_translate(line.split(":")[-1].strip())
+        elif re.search(r"(?i)(City|Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora)", line):
+            value = line.split(":")[-1].strip() if ":" in line else line.strip()
+            customer["RecipientCity"] = auto_translate(value)
+
+    return customer
+
 def fetch_exchange_rate(date_obj, currency_code):
     try:
         url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml&search=true&date={date_obj.strftime('%d.%m.%Y')}"
@@ -136,40 +186,6 @@ def fetch_exchange_rate(date_obj, currency_code):
     except Exception as e:
         log(f"Exchange rate fetch failed: {e}")
     return 1.0
-
-def extract_customer_info(text):
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    service_line = extract_service_line(lines)
-    service_date = extract_date_from_service(service_line)
-    service_translated = auto_translate(service_line)
-    if service_date:
-        service_translated += f" от {auto_translate(service_date)}"
-
-    customer = {
-        "RecipientName": "",
-        "RecipientID": "",
-        "RecipientVAT": "",
-        "RecipientAddress": "",
-        "RecipientCity": "",
-        "RecipientCountry": "България",
-        "ServiceDescription": service_translated
-    }
-    for line in lines:
-        if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
-            customer["RecipientName"] = clean_recipient_name(line.split(":")[-1])
-        elif re.search(r"(?i)(ID No|Tax ID)", line):
-            m = re.search(r"\d+", line)
-            if m: customer["RecipientID"] = m.group(0)
-        elif re.search(r"(?i)(VAT|VAT No)", line):
-            m = re.search(r"BG\d+", line)
-            if m: customer["RecipientVAT"] = m.group(0)
-        elif re.search(r"(?i)(Address|Billing Address)", line):
-            customer["RecipientAddress"] = auto_translate(line.split(":")[-1].strip())
-        elif re.search(r"(?i)(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora)", line):
-            customer["RecipientCity"] = auto_translate(line.strip())
-        elif "Bulgaria" in line:
-            customer["RecipientCountry"] = "България"
-    return customer
 
 def get_drive_service():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")

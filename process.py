@@ -226,15 +226,11 @@ def extract_customer_info(text, supplier_name=""):
     service_date = extract_date_from_service(service_line)
     log(f"📅 Extracted service date: {service_date}")
 
-    if service_date:
-        # אם השירות כבר מכיל את החודש והשנה – תרגום רגיל
-        if service_date in service_line:
-            service_translated = auto_translate(service_line)
-        else:
-            # מוסיפים את התאריך במילים עם "м." לפי התקן
-            service_translated = f"{auto_translate(service_line)} м.{service_date}"
-    else:
-        service_translated = auto_translate(service_line)
+if service_date:
+    service_translated = f"м.{service_date}"
+else:
+    service_translated = auto_translate(service_line)
+
 
     customer = {
         "RecipientName": "",

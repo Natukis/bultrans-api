@@ -1,3 +1,5 @@
+# ✅ גרסה מלאה של process.py למערכת BulTrans – כולל תאריך הנפקה + תאריך שירות
+
 import os
 import re
 import datetime
@@ -5,7 +7,7 @@ import pandas as pd
 import requests
 import pytesseract
 from pdf2image import convert_from_path
-from fastapi import UploadFile
+from fastapi import UploadFile, APIRouter
 from fastapi.responses import JSONResponse
 from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
@@ -22,6 +24,8 @@ TEMPLATE_PATH = "BulTrans_Template_FinalFInal.docx"
 UPLOAD_DIR = "/tmp/uploads"
 DRIVE_FOLDER_ID = "1JUTWRpBGKemiH6x89lHbV7b5J53fud3V"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+router = APIRouter()
 
 def log(msg):
     print(f"[BulTrans LOG] {msg}", flush=True)
@@ -51,16 +55,34 @@ def number_to_bulgarian_words(amount):
     except:
         return ""
 
-def extract_date_from_service(service_line):
-    patterns = [r"(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"]
+def extract_invoice_date(text):
+    patterns = [
+        r"(\d{2}/\d{2}/\d{4})",
+        r"(\d{4}-\d{2}-\d{2})",
+        r"(\d{2}\.\d{2}\.\d{4})",
+        r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})",
+        r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4})"
+    ]
     for pattern in patterns:
-        match = re.search(pattern, service_line)
+        match = re.search(pattern, text)
         if match:
-            try:
-                dt = datetime.datetime.strptime(match.group(1).replace('/', '.').replace('-', '.'), "%d.%m.%Y")
-                return dt.strftime("%B %Y")  # eg: "July 2021"
-            except:
-                continue
+            raw_date = match.group(1)
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
+                try:
+                    dt = datetime.datetime.strptime(raw_date, fmt)
+                    return dt.strftime("%d.%m.%Y"), dt
+                except:
+                    continue
+    return "", None
+
+def extract_date_from_service(service_line):
+    match = re.search(r"(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})", service_line)
+    if match:
+        try:
+            dt = datetime.datetime.strptime(match.group(1).replace('/', '.').replace('-', '.'), "%d.%m.%Y")
+            return dt.strftime("%B %Y")
+        except:
+            return None
     return None
 
 def extract_text_from_pdf(file_path):
@@ -169,10 +191,6 @@ def upload_to_drive(local_path, filename):
     service.permissions().create(fileId=uploaded_file["id"], body={"type": "anyone", "role": "reader"}).execute()
     return f"https://drive.google.com/file/d/{uploaded_file['id']}/view"
 
-from fastapi import APIRouter
-
-router = APIRouter()
-
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     try:
@@ -186,15 +204,16 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         lines = text.splitlines()
         customer = extract_customer_info(text)
 
+        date_str, date_obj = extract_invoice_date(text)
+        if not date_obj:
+            date_obj = datetime.datetime.today()
+            date_str = date_obj.strftime("%d.%m.%Y")
+
         df = pd.read_excel(SUPPLIERS_PATH)
         row = df[df["SupplierCompanyID"] == int(supplier_id)]
         if row.empty:
             return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
         row = row.iloc[0]
-
-        date_match = re.search(r"\b(\d{2}[./-]\d{2}[./-]\d{4})\b", text)
-        date_obj = datetime.datetime.strptime(date_match.group(1).replace('/', '.').replace('-', '.'), "%d.%m.%Y") if date_match else datetime.datetime.today()
-        date_str = date_obj.strftime("%d.%m.%Y")
 
         currency_code = next((curr for curr in ["USD", "EUR", "GBP", "ILS", "BGN"] if curr in text), "EUR")
         exchange_rate = fetch_exchange_rate(date_obj, currency_code) if currency_code != "BGN" else 1.0

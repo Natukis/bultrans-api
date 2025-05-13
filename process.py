@@ -203,12 +203,16 @@ def extract_customer_info(text, supplier_name=""):
         if re.search(r"(?i)(Customer Name|Bill To|Invoice To|Client)", line):
             raw_name = line.split(":", 1)[-1].strip()
 
-            if supplier_name_lower in raw_name.lower():
-                raw_name = raw_name.lower().replace(supplier_name_lower, "").strip()
+           # הסר שם ספק אם מופיע בתוך השם (case-insensitive)
+pattern = re.compile(re.escape(supplier_name), re.IGNORECASE)
+raw_name = pattern.sub("", raw_name).strip()
 
-            for stop_word in ["Supplier", "Vendor", "Company", "Firm"]:
-                if stop_word.lower() in raw_name.lower():
-                    raw_name = raw_name.split(stop_word)[0].strip()
+# הסר מילים מיותרות כמו "Supplier", גם אם מחוברות
+for word in ["Supplier", "Vendor", "Company", "Firm"]:
+    raw_name = re.sub(rf"\b{word}\b", "", raw_name, flags=re.IGNORECASE)
+
+# ניקוי כפול: רווחים מיותרים אחרי מחיקות
+raw_name = ' '.join(raw_name.strip().split())
 
             raw_name = clean_recipient_name(raw_name)
             if raw_name:

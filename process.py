@@ -114,8 +114,9 @@ def extract_text_from_docx(file_path):
         return ""
 
 def clean_recipient_name(line):
-    line = re.sub(r'(?i)\b(Supplier|Customer|Client)\b', '', line)
-    return line.strip()
+    # הסר מילים מיותרות גם אם הן באמצע השם
+    line = re.sub(r"(?i)\\b(Supplier|Customer|Client)\\b", "", line)
+    return ' '.join(line.split()).strip()
 
 def extract_service_line(lines):
     for line in lines:

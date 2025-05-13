@@ -116,9 +116,10 @@ def extract_text_from_docx(file_path):
 def clean_recipient_name(line):
     keywords = ["Supplier", "Customer", "Client"]
     for word in keywords:
-        line = re.sub(rf"(?i){word}$", "", line.strip())  # אם בסוף השם
-        line = re.sub(rf"(?i)\s{word}\b", "", line.strip())  # אם באמצע עם רווח
-    return ' '.join(line.split())
+        line = re.sub(rf"(?i)\b{word}\b", "", line)  # מילה עצמאית
+        line = re.sub(rf"(?i)\s+{word}", "", line)   # מילה צמודה עם רווח
+        line = re.sub(rf"(?i){word}$", "", line)     # אם מופיעה בסוף
+    return ' '.join(line.split()).strip()
 
 def extract_service_line(lines):
     for line in lines:

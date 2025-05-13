@@ -142,6 +142,15 @@ def extract_date_from_service(service_line):
     return None
 
 def safe_extract_float(text):
+
+    def extract_amount(text):
+    for line in text.splitlines()[::-1]:  # עובר מהסוף להתחלה
+        if re.search(r"(?i)(total|subtotal|amount due|grand total)", line):
+            val = safe_extract_float(line)
+            if val > 0:
+                return val
+    return 0.0
+
     match = re.search(r"(\d[\d\s,.]+)", text)
     if match:
         try:
@@ -286,11 +295,11 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             date_obj = datetime.datetime.today()
             date_str = date_obj.strftime("%d.%m.%Y")
         currency_code = extract_currency_code(text)
-        quantity = extract_quantity(text)
+        amount = extract_amount(text)  # זה הסכום המקורי מהחשבונית
         unit_price = extract_unit_price(currency_code, date_obj)
-        amount_bgn = round(quantity * unit_price, 2)
-        vat_amount = round(amount_bgn * 0.2, 2)
-        total_bgn = round(amount_bgn + vat_amount, 2)
+        line_total = round(amount * unit_price, 2)
+        vat_amount = round(line_total * 0.2, 2)
+        total_bgn = round(line_total + vat_amount, 2)
         invoice_number = f"{int(row['Last invoice number']) + 1:08d}"
         df.at[row.name, "Last invoice number"] += 1
         df.to_excel(SUPPLIERS_PATH, index=False)
@@ -315,10 +324,10 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "Date": date_str,
             "ServiceDescription": customer["ServiceDescription"],
             "Cur": currency_code,
-            "Amount": quantity,
+            "Amount": amount,
             "UnitPrice": unit_price,
-            "LineTotal": amount_bgn,
-            "AmountBGN": amount_bgn,
+            "LineTotal": line_total,
+            "AmountBGN": line_total,
             "VATAmount": vat_amount,
             "TotalBGN": total_bgn,
             "ExchangeRate": unit_price,

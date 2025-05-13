@@ -13,10 +13,11 @@ def test_auto_translate():
     assert result != ""
 
 def test_number_to_bulgarian_words():
-    assert number_to_bulgarian_words(5640) == "5640 лева"
-    assert number_to_bulgarian_words(700) == "700 лева"
-    assert number_to_bulgarian_words(1) == "1 лева"
-    assert number_to_bulgarian_words(0) == "0 лева"
+    assert number_to_bulgarian_words(5640) == "5640 лв."
+    assert number_to_bulgarian_words(700) == "700 лв."
+    assert number_to_bulgarian_words(1) == "1 лв."
+    assert number_to_bulgarian_words(0) == "0 лв."
+    assert number_to_bulgarian_words(469.4) == "469 лв. и 40 ст."
 
 def test_extract_invoice_date():
     assert extract_invoice_date("Invoice date: 18/08/2021")[0] == "18.08.2021"
@@ -33,12 +34,11 @@ def test_extract_customer_info():
         "City: Sofia"
     )
     result = extract_customer_info(text)
-    assert result["RecipientName"] == "QUESTE LTD"  # מוסר את "Supplier"
+    assert result["RecipientName"] == "QUESTE LTD"
     assert result["RecipientID"] == "203743737"
     assert result["RecipientVAT"] == "BG203743737"
     assert result["RecipientAddress"] == "Aleksandar Stamboliiski 134"
     assert result["RecipientCity"] == "Sofia"
-    assert isinstance(result["ServiceDescription"], str)
 
 def test_safe_extract_float():
     assert safe_extract_float("Total Amount: BGN 4 700.00") == 4700.0

@@ -214,15 +214,14 @@ def extract_customer_info(text, supplier_name=""):
     service_date = extract_date_from_service(service_line)
 
     if service_date:
-    # אם התאריך כבר בתוך השורה (למשל "м.Март 2025") – פשוט לתרגם כמו שהוא
-if service_date in service_line:
+        # פשוט לתרגם כמו שהוא אם התאריך כבר מופיע בשורה (למשל "м.Март 2025")
+        if service_date in service_line:
+            service_translated = auto_translate(service_line)
+        else:
+            # אחרת – להוסיף את התאריך אחרי השורה
+            service_translated = f"{auto_translate(service_line)} от {auto_translate(service_date)}"
+    else:
         service_translated = auto_translate(service_line)
-else:
-        # אחרת – הוסף את התאריך אחרי השורה
-        service_translated = f"{auto_translate(service_line)} от {auto_translate(service_date)}"
-else:
-    service_translated = auto_translate(service_line)
-
 
     customer = {
         "RecipientName": "",

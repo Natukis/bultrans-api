@@ -176,25 +176,47 @@ def extract_customer_info(text):
         service_translated += f" от {auto_translate(service_date)}"
 
     known_countries = {"Bulgaria": "България", "UK": "Обединеното кралство", "USA": "САЩ"}
-    customer = {"RecipientName": "", "RecipientID": "", "RecipientVAT": "", "RecipientAddress": "", "RecipientCity": "", "RecipientCountry": "България", "ServiceDescription": service_translated}
+    customer = {
+        "RecipientName": "",
+        "RecipientID": "",
+        "RecipientVAT": "",
+        "RecipientAddress": "",
+        "RecipientCity": "",
+        "RecipientCountry": "България",
+        "ServiceDescription": service_translated
+    }
 
     for line in lines:
         for eng, bg in known_countries.items():
             if eng.lower() in line.lower():
                 customer["RecipientCountry"] = bg
+
+        # שם הלקוח
         if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
-            customer["RecipientName"] = clean_recipient_name(line.split(":")[-1])
+            raw_name = line.split(":", 1)[-1].strip()
+            if "Banana Express" not in raw_name:  # לוודא שזה לא הספק
+                customer["RecipientName"] = raw_name
+
         elif re.search(r"(?i)(ID No|Tax ID)", line):
             m = re.search(r"\d+", line)
-            if m: customer["RecipientID"] = m.group(0)
+            if m:
+                customer["RecipientID"] = m.group(0)
+
         elif re.search(r"(?i)(VAT|VAT No)", line):
             m = re.search(r"BG\d+", line)
-            if m: customer["RecipientVAT"] = m.group(0)
+            if m:
+                customer["RecipientVAT"] = m.group(0)
+
         elif re.search(r"(?i)(Address|Billing Address)", line):
             customer["RecipientAddress"] = auto_translate(line.split(":")[-1].strip())
+
         elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
             val = line.split(":")[-1].strip() if ":" in line else line.strip()
             customer["RecipientCity"] = auto_translate(val)
+
+    # תרגום שם הלקוח – פונטית בלבד
+    if customer["RecipientName"]:
+        customer["RecipientName"] = auto_translate(customer["RecipientName"])
 
     return customer
 

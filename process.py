@@ -170,13 +170,19 @@ def fetch_exchange_rate(date_obj, currency_code):
 
 def extract_customer_info(text):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
+
     service_line = extract_service_line(lines)
     service_date = extract_date_from_service(service_line)
     service_translated = auto_translate(service_line)
     if service_date:
         service_translated += f" от {auto_translate(service_date)}"
 
-    known_countries = {"Bulgaria": "България", "UK": "Обединеното кралство", "USA": "САЩ"}
+    known_countries = {
+        "Bulgaria": "България",
+        "UK": "Обединеното кралство",
+        "USA": "САЩ"
+    }
+
     customer = {
         "RecipientName": "",
         "RecipientID": "",
@@ -192,11 +198,10 @@ def extract_customer_info(text):
             if eng.lower() in line.lower():
                 customer["RecipientCountry"] = bg
 
-        # שם הלקוח
-       if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
-    raw_name = line.split(":", 1)[-1].strip()
-    if "Banana Express" not in raw_name:  # לוודא שזה לא הספק
-        customer["RecipientName"] = clean_recipient_name(raw_name)
+        if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
+            raw_name = line.split(":", 1)[-1].strip()
+            if "Banana Express" not in raw_name:
+                customer["RecipientName"] = clean_recipient_name(raw_name)
 
         elif re.search(r"(?i)(ID No|Tax ID)", line):
             m = re.search(r"\d+", line)
@@ -209,13 +214,12 @@ def extract_customer_info(text):
                 customer["RecipientVAT"] = m.group(0)
 
         elif re.search(r"(?i)(Address|Billing Address)", line):
-            customer["RecipientAddress"] = auto_translate(line.split(":")[-1].strip())
+            customer["RecipientAddress"] = auto_translate(line.split(":", 1)[-1].strip())
 
         elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
-            val = line.split(":")[-1].strip() if ":" in line else line.strip()
+            val = line.split(":", 1)[-1].strip() if ":" in line else line.strip()
             customer["RecipientCity"] = auto_translate(val)
 
-    # תרגום שם הלקוח – פונטית בלבד
     if customer["RecipientName"]:
         customer["RecipientName"] = auto_translate(customer["RecipientName"])
 

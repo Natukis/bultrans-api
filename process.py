@@ -1,5 +1,3 @@
-# ✅ גרסה מלאה של process.py למערכת BulTrans – כולל תאריך הנפקה + תאריך שירות
-
 import os
 import re
 import datetime
@@ -105,6 +103,7 @@ def extract_text_from_docx(file_path):
         return ""
 
 def clean_recipient_name(line):
+    line = re.sub(r'(?i)\b(Supplier|Customer|Client)\b', '', line)
     return line.strip()
 
 def extract_service_line(lines):

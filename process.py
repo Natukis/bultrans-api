@@ -132,9 +132,10 @@ def extract_service_line(lines):
     return ""
 
 def extract_date_from_service(service_line):
+    print(f"📥 Checking line for date: {service_line}")
     patterns = [
         r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}",  # לדוגמה: 14.7.2021
-        r"(м\.?\s?[А-Яа-я]+\s?20\d{2})"      # לדוגמה: м.Март 2025
+        r"(м\.?\s?[А-Яа-я]+\s?20\d{2})"
     ]
     bg_months = {
         1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
@@ -144,11 +145,17 @@ def extract_date_from_service(service_line):
         match = re.search(pattern, service_line)
         if match:
             raw = match.group(0).replace('/', '.').replace('-', '.')
+            print(f"🔎 Found raw date: {raw}")
             try:
                 dt = datetime.datetime.strptime(raw, "%d.%m.%Y")
-                return f"{bg_months[dt.month]} {dt.year}"
+                result = f"{bg_months[dt.month]} {dt.year}"
+                print(f"✅ Parsed as: {result}")
+                return result
             except:
-                return match.group(0).replace("м.", "").strip().capitalize()
+                fallback = match.group(0).replace("м.", "").strip().capitalize()
+                print(f"⚠️ Fallback to raw: {fallback}")
+                return fallback
+    print("⛔ No date found")
     return None
 
 def build_service_description(service_line, invoice_date):

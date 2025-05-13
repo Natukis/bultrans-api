@@ -151,6 +151,22 @@ def extract_date_from_service(service_line):
                 return match.group(0).replace("м.", "").strip().capitalize()
     return None
 
+def build_service_description(service_line, invoice_date):
+    service_line_translated = auto_translate(service_line)
+    service_month = extract_date_from_service(service_line)
+
+    # אם לא נמצא תאריך בתוך השירות – נ fallback לתאריך החשבונית
+    if not service_month and invoice_date:
+        bg_months = {
+            1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
+            7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"
+        }
+        service_month = f"{bg_months[invoice_date.month]} {invoice_date.year}"
+
+    if service_month:
+        return f"{service_line_translated} от м.{service_month}"
+    else:
+        return service_line_translated
 
 def safe_extract_float(text):
     match = re.search(r"(\d[\d\s,.]+)", text)
@@ -223,12 +239,7 @@ def extract_customer_info(text, supplier_name=""):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     service_line = extract_service_line(lines)
     service_date = extract_date_from_service(service_line)
-    log(f"📅 Extracted service date: {service_date}")
-
-    if service_date:
-        service_translated = f"{auto_translate(service_line)} от м.{service_date}"
-    else:
-        service_translated = auto_translate(service_line)
+    service_translated = build_service_description(service_line, extract_invoice_date(text)[1])
 
     customer = {
         "RecipientName": "",

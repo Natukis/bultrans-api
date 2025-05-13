@@ -29,18 +29,27 @@ def log(msg):
     print(f"[BulTrans LOG] {msg}", flush=True)
 
 def auto_translate(text, target_lang="bg"):
+    print("[DEBUG] GOOGLE_API_KEY:", os.getenv("GOOGLE_API_KEY"))  # 🧪 בדיקה של זמינות המפתח
     if not text.strip():
         return text
     try:
         api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            log("⚠️ Missing GOOGLE_API_KEY in environment variables")
+            return text
+
         url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
         payload = {"q": text, "target": target_lang}
         response = requests.post(url, json=payload)
+
         if response.status_code == 200:
             return response.json()["data"]["translations"][0]["translatedText"]
+        else:
+            log(f"⚠️ Translation API error: {response.status_code} - {response.text}")
     except Exception as e:
-        log(f"Translation failed: {e}")
+        log(f"❌ Translation failed: {e}")
     return text
+
 
 def number_to_bulgarian_words(amount, as_words=False):
     try:

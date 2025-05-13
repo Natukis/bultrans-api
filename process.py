@@ -164,7 +164,7 @@ def build_service_description(service_line, invoice_date):
         service_month = f"{bg_months[invoice_date.month]} {invoice_date.year}"
 
     if service_month:
-        return f"{service_line_translated} от м.{service_month}"
+        return f"{service_line_translated}, от м.{service_month}"
     else:
         return service_line_translated
 

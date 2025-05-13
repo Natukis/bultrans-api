@@ -21,15 +21,13 @@ SUPPLIERS_PATH = "suppliers.xlsx"
 TEMPLATE_PATH = "BulTrans_Template_FinalFInal.docx"
 UPLOAD_DIR = "/tmp/uploads"
 DRIVE_FOLDER_ID = "1JUTWRpBGKemiH6x89lHbV7b5J53fud3V"
-
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def log(msg):
     print(f"[BulTrans LOG] {msg}", flush=True)
 
 def auto_translate(text, target_lang="bg"):
-    if not text.strip():
-        return text
+    if not text.strip(): return text
     try:
         api_key = os.getenv("GOOGLE_API_KEY")
         url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
@@ -53,58 +51,23 @@ def number_to_bulgarian_words(amount):
     except:
         return ""
 
-def extract_invoice_date(text):
-    patterns = [
-        r"(\d{2}/\d{2}/\d{4})",
-        r"(\d{4}-\d{2}-\d{2})",
-        r"(\d{2}\.\d{2}\.\d{4})",
-        r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})",
-        r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4})"
-    ]
+def extract_date_from_service(service_line):
+    patterns = [r"(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"]
     for pattern in patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, service_line)
         if match:
-            raw_date = match.group(1)
-            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
-                try:
-                    dt = datetime.datetime.strptime(raw_date, fmt)
-                    return dt.strftime("%d.%m.%Y"), dt
-                except:
-                    continue
-    return "", None
-
-def safe_extract_float(text):
-    match = re.search(r"(\d[\d\s,.]+)", text)
-    if match:
-        try:
-            num = match.group(1).replace(" ", "").replace(",", "")
-            return float(num)
-        except:
-            return 0.0
-    return 0.0
-
-def fetch_exchange_rate(date_obj, currency_code):
-    try:
-        url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml&search=true&date={date_obj.strftime('%d.%m.%Y')}"
-        response = requests.get(url, timeout=5)
-        if response.status_code != 200:
-            return 1.0
-        root = ET.fromstring(response.content)
-        for row in root.findall(".//ROW"):
-            code = row.find("CODE").text
-            if code == currency_code.upper():
-                rate = row.find("RATE").text
-                return float(rate.replace(",", "."))
-    except Exception as e:
-        log(f"Exchange rate fetch failed: {e}")
-    return 1.0
+            try:
+                dt = datetime.datetime.strptime(match.group(1).replace('/', '.').replace('-', '.'), "%d.%m.%Y")
+                return dt.strftime("%B %Y")  # eg: "July 2021"
+            except:
+                continue
+    return None
 
 def extract_text_from_pdf(file_path):
     try:
         reader = PdfReader(file_path)
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        if text.strip():
-            return text
+        if text.strip(): return text
         images = convert_from_path(file_path)
         return "\n".join(pytesseract.image_to_string(img) for img in images)
     except Exception as e:
@@ -120,48 +83,71 @@ def extract_text_from_docx(file_path):
         return ""
 
 def clean_recipient_name(line):
-    line = re.sub(r'(?i)(Supplier|Доставчик).*', '', line)
-    words = line.strip().split()
-    return ' '.join(words[:4])
+    return line.strip()
 
-def extract_service_description(lines):
-    for line in reversed(lines):
-        if len(line) > 20 and not re.search(r"(?i)(Quantity|Total|Amount|VAT|Net|Общо|Bank|IBAN|Account|Invoice|номер)", line):
+def extract_service_line(lines):
+    for line in lines:
+        if re.search(r"(?i)(Service|услуга|agreement|обслужване|based)", line):
             return line.strip()
     return ""
 
+def safe_extract_float(text):
+    match = re.search(r"(\d[\d\s,.]+)", text)
+    if match:
+        try:
+            num = match.group(1).replace(" ", "").replace(",", "")
+            return float(num)
+        except:
+            return 0.0
+    return 0.0
+
+def fetch_exchange_rate(date_obj, currency_code):
+    try:
+        url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml&search=true&date={date_obj.strftime('%d.%m.%Y')}"
+        response = requests.get(url, timeout=5)
+        if response.status_code != 200: return 1.0
+        root = ET.fromstring(response.content)
+        for row in root.findall(".//ROW"):
+            code = row.find("CODE").text
+            if code == currency_code.upper():
+                rate = row.find("RATE").text
+                return float(rate.replace(",", "."))
+    except Exception as e:
+        log(f"Exchange rate fetch failed: {e}")
+    return 1.0
+
 def extract_customer_info(text):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
+    service_line = extract_service_line(lines)
+    service_date = extract_date_from_service(service_line)
+    service_translated = auto_translate(service_line)
+    if service_date:
+        service_translated += f" от {auto_translate(service_date)}"
+
     customer = {
         "RecipientName": "",
         "RecipientID": "",
         "RecipientVAT": "",
         "RecipientAddress": "",
         "RecipientCity": "",
-        "ServiceDescription": extract_service_description(lines)
+        "RecipientCountry": "България",
+        "ServiceDescription": service_translated
     }
-
     for line in lines:
         if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
-            if ':' in line:
-                value = line.split(':', 1)[1].strip()
-                customer["RecipientName"] = clean_recipient_name(value)
-        elif re.search(r"(?i)(ID No|Tax ID|Identification Number)", line):
-            match = re.search(r"\d+", line)
-            if match:
-                customer["RecipientID"] = match.group(0)
-        elif re.search(r"(?i)(VAT No|VAT|VAT ID|Tax Number)", line):
-            match = re.search(r"BG\d+", line)
-            if match:
-                customer["RecipientVAT"] = match.group(0)
+            customer["RecipientName"] = clean_recipient_name(line.split(":")[-1])
+        elif re.search(r"(?i)(ID No|Tax ID)", line):
+            m = re.search(r"\d+", line)
+            if m: customer["RecipientID"] = m.group(0)
+        elif re.search(r"(?i)(VAT|VAT No)", line):
+            m = re.search(r"BG\d+", line)
+            if m: customer["RecipientVAT"] = m.group(0)
         elif re.search(r"(?i)(Address|Billing Address)", line):
-            customer["RecipientAddress"] = line.split(":")[-1].strip()
-        elif re.search(r"(?i)(City|Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora|Pleven)", line):
-            if ':' in line:
-                customer["RecipientCity"] = line.split(':', 1)[1].strip()
-            else:
-                customer["RecipientCity"] = line.strip()
-
+            customer["RecipientAddress"] = auto_translate(line.split(":")[-1])
+        elif re.search(r"(?i)(Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora)", line):
+            customer["RecipientCity"] = auto_translate(line.strip())
+        elif "Bulgaria" in line:
+            customer["RecipientCountry"] = "България"
     return customer
 
 def get_drive_service():
@@ -175,14 +161,19 @@ def get_drive_service():
     return build("drive", "v3", credentials=credentials)
 
 def upload_to_drive(local_path, filename):
-    log("🔼 Uploading file to Google Drive...")
+    log("Uploading to Drive...")
     service = get_drive_service()
     file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
     media = MediaFileUpload(local_path, resumable=True)
     uploaded_file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
     service.permissions().create(fileId=uploaded_file["id"], body={"type": "anyone", "role": "reader"}).execute()
-    return f"https://drive.google.com/file/d/{uploaded_file['id']}/view?usp=sharing"
+    return f"https://drive.google.com/file/d/{uploaded_file['id']}/view"
 
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     try:
         log("🚀 Starting invoice processing...")
@@ -195,32 +186,27 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         lines = text.splitlines()
         customer = extract_customer_info(text)
 
-        required_fields = ["RecipientName", "RecipientID", "RecipientVAT", "RecipientAddress", "RecipientCity"]
-        missing_fields = [f for f in required_fields if not customer.get(f)]
-        if missing_fields:
-            return JSONResponse({"success": False, "error": f"Missing required fields in invoice: {', '.join(missing_fields)}"}, status_code=400)
-
-        date_str, date_obj = extract_invoice_date(text)
-        if not date_obj:
-            return JSONResponse({"success": False, "error": "Invoice date not found or unrecognized format"}, status_code=400)
-
         df = pd.read_excel(SUPPLIERS_PATH)
         row = df[df["SupplierCompanyID"] == int(supplier_id)]
         if row.empty:
             return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
         row = row.iloc[0]
 
+        date_match = re.search(r"\b(\d{2}[./-]\d{2}[./-]\d{4})\b", text)
+        date_obj = datetime.datetime.strptime(date_match.group(1).replace('/', '.').replace('-', '.'), "%d.%m.%Y") if date_match else datetime.datetime.today()
+        date_str = date_obj.strftime("%d.%m.%Y")
+
         currency_code = next((curr for curr in ["USD", "EUR", "GBP", "ILS", "BGN"] if curr in text), "EUR")
         exchange_rate = fetch_exchange_rate(date_obj, currency_code) if currency_code != "BGN" else 1.0
 
         amount = vat = total = 0.0
         for i, line in enumerate(lines):
-            if re.search(r"(?i)Total Amount of Bill", line) and i + 1 < len(lines):
-                total = safe_extract_float(lines[i + 1])
-            elif re.search(r"(?i)VAT Amount", line) and i + 1 < len(lines):
-                vat = safe_extract_float(lines[i + 1])
-            elif re.search(r"(?i)Subtotal|Amount", line) and i + 1 < len(lines):
-                amount = safe_extract_float(lines[i + 1])
+            if re.search(r"(?i)Total Amount", line):
+                total = safe_extract_float(line)
+            elif re.search(r"(?i)VAT Amount", line):
+                vat = safe_extract_float(line)
+            elif re.search(r"(?i)(Subtotal|Amount)", line):
+                amount = safe_extract_float(line)
 
         if total == 0.0 and amount > 0 and vat > 0:
             total = amount + vat
@@ -236,23 +222,25 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         df.to_excel(SUPPLIERS_PATH, index=False)
 
         context = {
-            "RecipientName": auto_translate(customer["RecipientName"]),
+            "RecipientName": customer["RecipientName"],
             "RecipientID": customer["RecipientID"],
             "RecipientVAT": customer["RecipientVAT"],
-            "RecipientAddress": auto_translate(customer["RecipientAddress"]),
-            "RecipientCity": auto_translate(customer["RecipientCity"]),
+            "RecipientAddress": customer["RecipientAddress"],
+            "RecipientCity": customer["RecipientCity"],
+            "RecipientCountry": customer["RecipientCountry"],
             "SupplierName": auto_translate(str(row["SupplierName"])),
             "SupplierCompanyID": str(row["SupplierCompanyID"]),
             "SupplierCompanyVAT": str(row["SupplierCompanyVAT"]),
             "SupplierAddress": auto_translate(str(row["SupplierAddress"])),
             "SupplierCity": auto_translate(str(row["SupplierCity"])),
+            "SupplierCountry": auto_translate(str(row.get("SupplierCountry", "България"))),
             "SupplierContactPerson": auto_translate(str(row["SupplierContactPerson"])),
             "IBAN": row["IBAN"],
             "BankName": auto_translate(str(row["Bankname"])),
             "BankCode": row.get("BankCode", ""),
             "InvoiceNumber": invoice_number,
             "Date": date_str,
-            "ServiceDescription": auto_translate(customer["ServiceDescription"] or "Услуга по договор"),
+            "ServiceDescription": customer["ServiceDescription"],
             "Cur": "BGN",
             "Amount": 1,
             "UnitPrice": amount_bgn,
@@ -268,13 +256,12 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
 
         tpl = DocxTemplate(TEMPLATE_PATH)
         tpl.render(context)
-        output_filename = f"bulgarian_invoice_{context['InvoiceNumber']}.docx"
+        output_filename = f"bulgarian_invoice_{invoice_number}.docx"
         output_path = f"/tmp/{output_filename}"
         tpl.save(output_path)
 
         drive_link = upload_to_drive(output_path, output_filename)
-
-        return JSONResponse({"success": True, "data": {"invoice_number": context['InvoiceNumber'], "drive_link": drive_link}})
+        return JSONResponse({"success": True, "data": {"invoice_number": invoice_number, "drive_link": drive_link}})
 
     except Exception as e:
         log("❌ EXCEPTION OCCURRED:")

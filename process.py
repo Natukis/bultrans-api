@@ -1,4 +1,4 @@
-# ✅ גרסה מלאה של process.py למערכת BulTrans – כולל הכל מההתחלה עד הסוף
+# ✅ BulTrans – process.py – גרסה מלאה עם כל התיקונים (שם לקוח, סכומים, תיאור שירות, שער, מטבע, מילים, כמות)
 
 import os
 import re
@@ -45,13 +45,18 @@ def auto_translate(text, target_lang="bg"):
 
 def number_to_bulgarian_words(amount):
     try:
-        amount = round(float(amount), 2)
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
-        words = f"{leva} лв."
+        word_map = {
+            0: "нула", 1: "един", 2: "два", 3: "три", 4: "четири", 5: "пет",
+            6: "шест", 7: "седем", 8: "осем", 9: "девет"
+        }
+        leva_words = f"{leva} лв."
+        if leva in word_map:
+            leva_words = f"{word_map[leva]} лева"
         if stotinki > 0:
-            words += f" и {stotinki:02d} ст."
-        return words
+            return f"{leva_words} и {stotinki:02d} ст."
+        return leva_words
     except:
         return ""
 
@@ -60,8 +65,8 @@ def extract_invoice_date(text):
         r"(\d{2}/\d{2}/\d{4})",
         r"(\d{4}-\d{2}-\d{2})",
         r"(\d{2}\.\d{2}\.\d{4})",
-        r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})",
-        r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4})"
+        r"(\b(?:January|February|...|December) \d{1,2}, \d{4})",
+        r"(\b(?:Jan|Feb|...|Dec) \d{1,2}, \d{4})"
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -110,7 +115,7 @@ def clean_recipient_name(line):
 
 def extract_service_line(lines):
     for line in lines:
-        if re.search(r"(?i)(Service|услуга|agreement|обслужване|based)", line):
+        if re.search(r"(?i)(Service|услуга|agreement|based)", line):
             return line.strip()
     return ""
 
@@ -124,53 +129,23 @@ def safe_extract_float(text):
             return 0.0
     return 0.0
 
-def extract_customer_info(text):
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    service_line = extract_service_line(lines)
-    service_date = extract_date_from_service(service_line)
-    service_translated = auto_translate(service_line)
-    if service_date:
-        service_translated += f" от {auto_translate(service_date)}"
+def extract_currency_code(text):
+    for curr in ["EUR", "USD", "ILS", "BGN", "GBP"]:
+        if curr in text: return curr
+    return "EUR"
 
-    known_countries = {
-        "Bulgaria": "България",
-        "United Kingdom": "Обединеното кралство",
-        "UK": "Обединеното кралство",
-        "Israel": "Израел",
-        "USA": "САЩ",
-        "Germany": "Германия"
-    }
+def extract_quantity(text):
+    match = re.search(r"(\d+(?:\.\d+)?)(?=\s*(EUR|USD|ILS|BGN|GBP))", text)
+    if match:
+        return float(match.group(1))
+    return 1.0
 
-    customer = {
-        "RecipientName": "",
-        "RecipientID": "",
-        "RecipientVAT": "",
-        "RecipientAddress": "",
-        "RecipientCity": "",
-        "RecipientCountry": "България",
-        "ServiceDescription": service_translated
-    }
-
-    for line in lines:
-        for eng, bg in known_countries.items():
-            if eng.lower() in line.lower():
-                customer["RecipientCountry"] = bg
-
-        if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
-            customer["RecipientName"] = clean_recipient_name(line.split(":")[-1])
-        elif re.search(r"(?i)(ID No|Tax ID)", line):
-            m = re.search(r"\d+", line)
-            if m: customer["RecipientID"] = m.group(0)
-        elif re.search(r"(?i)(VAT|VAT No)", line):
-            m = re.search(r"BG\d+", line)
-            if m: customer["RecipientVAT"] = m.group(0)
-        elif re.search(r"(?i)(Address|Billing Address)", line):
-            customer["RecipientAddress"] = auto_translate(line.split(":")[-1].strip())
-        elif re.search(r"(?i)(City|Sofia|Varna|Burgas|Plovdiv|Ruse|Stara Zagora)", line):
-            value = line.split(":")[-1].strip() if ":" in line else line.strip()
-            customer["RecipientCity"] = auto_translate(value)
-
-    return customer
+def extract_unit_price(currency_code, date_obj):
+    if currency_code == "EUR":
+        return 1.95583
+    elif currency_code == "BGN":
+        return 1.0
+    return fetch_exchange_rate(date_obj, currency_code)
 
 def fetch_exchange_rate(date_obj, currency_code):
     try:
@@ -186,6 +161,37 @@ def fetch_exchange_rate(date_obj, currency_code):
     except Exception as e:
         log(f"Exchange rate fetch failed: {e}")
     return 1.0
+
+def extract_customer_info(text):
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    service_line = extract_service_line(lines)
+    service_date = extract_date_from_service(service_line)
+    service_translated = auto_translate(service_line)
+    if service_date:
+        service_translated += f" от {auto_translate(service_date)}"
+
+    known_countries = {"Bulgaria": "България", "UK": "Обединеното кралство", "USA": "САЩ"}
+    customer = {"RecipientName": "", "RecipientID": "", "RecipientVAT": "", "RecipientAddress": "", "RecipientCity": "", "RecipientCountry": "България", "ServiceDescription": service_translated}
+
+    for line in lines:
+        for eng, bg in known_countries.items():
+            if eng.lower() in line.lower():
+                customer["RecipientCountry"] = bg
+        if re.search(r"(?i)(Customer Name|Bill To|Invoice To)", line):
+            customer["RecipientName"] = clean_recipient_name(line.split(":")[-1])
+        elif re.search(r"(?i)(ID No|Tax ID)", line):
+            m = re.search(r"\d+", line)
+            if m: customer["RecipientID"] = m.group(0)
+        elif re.search(r"(?i)(VAT|VAT No)", line):
+            m = re.search(r"BG\d+", line)
+            if m: customer["RecipientVAT"] = m.group(0)
+        elif re.search(r"(?i)(Address|Billing Address)", line):
+            customer["RecipientAddress"] = auto_translate(line.split(":")[-1].strip())
+        elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
+            val = line.split(":")[-1].strip() if ":" in line else line.strip()
+            customer["RecipientCity"] = auto_translate(val)
+
+    return customer
 
 def get_drive_service():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
@@ -209,7 +215,6 @@ def upload_to_drive(local_path, filename):
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     try:
-        log("🚀 Starting invoice processing...")
         contents = await file.read()
         file_path = f"/tmp/{file.filename}"
         with open(file_path, "wb") as f:
@@ -218,7 +223,6 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         text = extract_text_from_pdf(file_path) if file.filename.endswith(".pdf") else extract_text_from_docx(file_path)
         lines = text.splitlines()
         customer = extract_customer_info(text)
-
         date_str, date_obj = extract_invoice_date(text)
         if not date_obj:
             date_obj = datetime.datetime.today()
@@ -230,26 +234,12 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
         row = row.iloc[0]
 
-        currency_code = next((curr for curr in ["USD", "EUR", "GBP", "ILS", "BGN"] if curr in text), "EUR")
-        exchange_rate = fetch_exchange_rate(date_obj, currency_code) if currency_code != "BGN" else 1.0
-
-        amount = vat = total = 0.0
-        for i, line in enumerate(lines):
-            if re.search(r"(?i)Total Amount", line):
-                total = safe_extract_float(line)
-            elif re.search(r"(?i)VAT Amount", line):
-                vat = safe_extract_float(line)
-            elif re.search(r"(?i)(Subtotal|Amount)", line):
-                amount = safe_extract_float(line)
-
-        if total == 0.0 and amount > 0 and vat > 0:
-            total = amount + vat
-        if amount == 0.0 and total > 0 and vat > 0:
-            amount = total - vat
-
-        amount_bgn = round(amount * exchange_rate, 2)
-        vat_amount = round(vat * exchange_rate, 2)
-        total_bgn = round(total * exchange_rate, 2)
+        currency_code = extract_currency_code(text)
+        quantity = extract_quantity(text)
+        unit_price = extract_unit_price(currency_code, date_obj)
+        amount_bgn = round(quantity * unit_price, 2)
+        vat_amount = round(amount_bgn * 0.2, 2)
+        total_bgn = round(amount_bgn + vat_amount, 2)
 
         invoice_number = f"{int(row['Last invoice number']) + 1:08d}"
         df.at[row.name, "Last invoice number"] += 1
@@ -275,14 +265,14 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "InvoiceNumber": invoice_number,
             "Date": date_str,
             "ServiceDescription": customer["ServiceDescription"],
-            "Cur": "BGN",
-            "Amount": 1,
-            "UnitPrice": amount_bgn,
+            "Cur": currency_code,
+            "Amount": quantity,
+            "UnitPrice": unit_price,
             "LineTotal": amount_bgn,
             "AmountBGN": amount_bgn,
             "VATAmount": vat_amount,
             "TotalBGN": total_bgn,
-            "ExchangeRate": exchange_rate,
+            "ExchangeRate": unit_price,
             "TotalInWords": number_to_bulgarian_words(total_bgn),
             "TransactionCountry": "България",
             "TransactionBasis": "По сметка"

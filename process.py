@@ -43,10 +43,13 @@ def auto_translate(text, target_lang="bg"):
 
 def number_to_bulgarian_words(amount):
     try:
-        amount = int(round(float(amount)))
-        if amount == 0:
-            return "0 лева"
-        return f"{amount} лева"
+        amount = round(float(amount), 2)
+        leva = int(amount)
+        stotinki = int(round((amount - leva) * 100))
+        words = f"{leva} лв."
+        if stotinki > 0:
+            words += f" и {stotinki:02d} ст."
+        return words
     except:
         return ""
 
@@ -117,7 +120,9 @@ def extract_text_from_docx(file_path):
         return ""
 
 def clean_recipient_name(line):
-    return re.sub(r"(?i)(Supplier|Доставчик)", "", line).strip()
+    line = re.sub(r'(?i)(Supplier|Доставчик).*', '', line)
+    words = line.strip().split()
+    return ' '.join(words[:4])
 
 def extract_service_description(lines):
     for line in reversed(lines):
@@ -209,23 +214,13 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         exchange_rate = fetch_exchange_rate(date_obj, currency_code) if currency_code != "BGN" else 1.0
 
         amount = vat = total = 0.0
-        previous_line = ""
-        for line in lines:
-            if re.search(r"(?i)Total Amount of Bill", line):
-                previous_line = "total"
-            elif re.search(r"(?i)VAT Amount", line):
-                previous_line = "vat"
-            elif re.search(r"(?i)Subtotal|Amount", line):
-                previous_line = "amount"
-            elif re.search(r"(?i)\d+[\d\s,.]*", line):
-                value = safe_extract_float(line)
-                if previous_line == "total" and value > 0:
-                    total = value
-                elif previous_line == "vat" and value > 0:
-                    vat = value
-                elif previous_line == "amount" and value > 0:
-                    amount = value
-                previous_line = ""
+        for i, line in enumerate(lines):
+            if re.search(r"(?i)Total Amount of Bill", line) and i + 1 < len(lines):
+                total = safe_extract_float(lines[i + 1])
+            elif re.search(r"(?i)VAT Amount", line) and i + 1 < len(lines):
+                vat = safe_extract_float(lines[i + 1])
+            elif re.search(r"(?i)Subtotal|Amount", line) and i + 1 < len(lines):
+                amount = safe_extract_float(lines[i + 1])
 
         if total == 0.0 and amount > 0 and vat > 0:
             total = amount + vat

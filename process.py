@@ -113,8 +113,7 @@ def extract_text_from_docx(file_path):
         log(f"DOCX text extraction failed: {e}")
         return ""
 
- def clean_recipient_name(line):
-    # הסר את המילים האלה גם אם הן מחוברות לשם
+def clean_recipient_name(line):
     keywords = ["Supplier", "Customer", "Client"]
     for word in keywords:
         line = re.sub(rf"(?i){word}$", "", line.strip())  # אם בסוף השם

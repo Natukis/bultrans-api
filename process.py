@@ -126,9 +126,10 @@ def clean_recipient_name(line):
     return ' '.join(line.strip().split())
 
 def extract_service_line(lines):
-    for line in lines:
+    for i, line in enumerate(lines):
         if re.search(r"(?i)(Service|услуга|agreement|based)", line):
-            return line.strip()
+            next_line = lines[i+1] if i+1 < len(lines) else ""
+            return f"{line.strip()} {next_line.strip()}"
     return ""
 
 def extract_date_from_service(service_line):
@@ -224,6 +225,7 @@ def extract_customer_info(text, supplier_name=""):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     service_line = extract_service_line(lines)
     service_date = extract_date_from_service(service_line)
+log(f"📅 Extracted service date: {service_date}")
 
     if service_date:
         # פשוט לתרגם כמו שהוא אם התאריך כבר מופיע בשורה (למשל "м.Март 2025")

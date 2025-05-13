@@ -128,8 +128,7 @@ def clean_recipient_name(line):
 def extract_service_line(lines):
     for i, line in enumerate(lines):
         if re.search(r"(?i)(Service|услуга|agreement|based)", line):
-            next_line = lines[i+1] if i+1 < len(lines) else ""
-            return f"{line.strip()} {next_line.strip()}"
+            return line.strip()
     return ""
 
 def extract_date_from_service(service_line):

@@ -231,7 +231,7 @@ def extract_customer_info(text, supplier_name=""):
             service_translated = auto_translate(service_line)
         else:
             # אחרת – להוסיף את התאריך אחרי השורה
-            service_translated = f"{auto_translate(service_line)} от {auto_translate(service_date)}"
+            service_translated = f"{auto_translate(service_line)} от {service_date}"
     else:
         service_translated = auto_translate(service_line)
 

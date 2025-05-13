@@ -113,11 +113,13 @@ def extract_text_from_docx(file_path):
         log(f"DOCX text extraction failed: {e}")
         return ""
 
-def clean_recipient_name(line):
-    # הסר מילים כמו 'Supplier', 'Customer', 'Client' שמופיעות בכל מקום בשורה
-    line = re.sub(r'(?i)\\b(Supplier|Customer|Client)\\b', '', line)
-    line = re.sub(r'(?i)(Supplier|Customer|Client)$', '', line)  # גם אם בסוף
-    return ' '.join(line.split()).strip()
+def def clean_recipient_name(line):
+    # הסר את המילים האלה גם אם הן מחוברות לשם
+    keywords = ["Supplier", "Customer", "Client"]
+    for word in keywords:
+        line = re.sub(rf"(?i){word}$", "", line.strip())  # אם בסוף השם
+        line = re.sub(rf"(?i)\s{word}\b", "", line.strip())  # אם באמצע עם רווח
+    return ' '.join(line.split())
 
 def extract_service_line(lines):
     for line in lines:

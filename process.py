@@ -145,19 +145,27 @@ def extract_date_from_service(service_line):
     for pattern in patterns:
         match = re.search(pattern, service_line)
         if match:
-            raw = match.group(0).replace('/', '.').replace('-', '.')
+            raw = match.group(0).replace('/', '.').replace('-', '.').strip()
             print(f"🔎 Found raw date: {raw}")
-            try:
-                dt = datetime.datetime.strptime(raw, "%d.%m.%Y")
-                result = f"{bg_months[dt.month]} {dt.year}"
-                print(f"✅ Parsed as: {result}")
-                return result
-            except:
-                fallback = match.group(0).replace("м.", "").strip().capitalize()
-                print(f"⚠️ Fallback to raw: {fallback}")
-                return fallback
+            parts = raw.split(".")
+            if len(parts) == 3:
+                day = parts[0].zfill(2)
+                month = parts[1].zfill(2)
+                year = parts[2]
+                normalized_date = f"{day}.{month}.{year}"
+                try:
+                    dt = datetime.datetime.strptime(normalized_date, "%d.%m.%Y")
+                    result = f"{bg_months[dt.month]} {dt.year}"
+                    print(f"✅ Parsed as: {result}")
+                    return result
+                except:
+                    pass
+            fallback = raw.replace("м.", "").strip().capitalize()
+            print(f"⚠️ Fallback to raw: {fallback}")
+            return fallback
     print("⛔ No date found")
     return None
+
 
 def build_service_description(service_line, invoice_date):
     import re

@@ -104,6 +104,18 @@ def number_to_bulgarian_words(amount, as_words=False):
             return f"{leva_words} лв. и {stotinki:02d} ст."
 
         else:
+            # מצב ללא מילים
+            leva_words = f"{leva} лв."
+            return f"{leva_words} и {stotinki:02d} ст." if stotinki > 0 else leva_words
+
+    except Exception as e:
+        log(f"Error in number_to_bulgarian_words: {e}")
+        return ""
+
+            leva_words = convert_to_words(leva)
+            return f"{leva_words} лв. и {stotinki:02d} ст."
+
+        else:
             leva_words = f"{leva} лв."
             return f"{leva_words} и {stotinki:02d} ст." if stotinki > 0 else leva_words
 

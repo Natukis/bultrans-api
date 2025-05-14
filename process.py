@@ -387,7 +387,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             date_obj = datetime.datetime.today()
 
         # הצגת התאריך בתבנית "חודש מילולי + שנה"
-        date_str = f"{bg_months[date_obj.month]} {date_obj.year}"
+        date_str = invoice_date_obj.strftime("%d.%m.%Y") if invoice_date_obj else datetime.datetime.today().strftime("%d.%m.%Y")
 
         currency_code = extract_currency_code(text)
         log(f"🔎 Detected currency: {currency_code}")

@@ -354,10 +354,36 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
         row = row.iloc[0]
         customer = extract_customer_info(text, row["SupplierName"])
-        date_str, date_obj = extract_invoice_date(text)
-        if not date_obj:
+        invoice_date_str, invoice_date_obj = extract_invoice_date(text)
+        service_line = extract_service_line(text.splitlines())
+        service_date_obj = None
+
+        # ננסה לחלץ תאריך משורת השירות
+        if service_line:
+        match = re.search(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", service_line)
+        if match:
+        try:
+            service_date_obj = datetime.datetime.strptime(match.group(0).replace('/', '.').replace('-', '.'), "%d.%m.%Y")
+        except:
+            service_date_obj = None
+
+        # מיפוי חודשים בולגריים
+        bg_months = {
+        1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
+        7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"
+    }
+
+        # בחירת התאריך שיוצג בחשבונית - עדיפות לתאריך מתוך השירות
+        if service_date_obj:
+            date_obj = service_date_obj
+        elif invoice_date_obj:
+            date_obj = invoice_date_obj
+        else:
             date_obj = datetime.datetime.today()
-            date_str = date_obj.strftime("%d.%m.%Y")
+
+        # הצגת התאריך בתבנית "חודש מילולי + שנה"
+        date_str = f"{bg_months[date_obj.month]} {date_obj.year}"
+
         currency_code = extract_currency_code(text)
         log(f"🔎 Detected currency: {currency_code}")
         amount = extract_amount(text)  # זה הסכום המקורי מהחשבונית

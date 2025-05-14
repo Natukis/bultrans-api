@@ -72,14 +72,41 @@ def number_to_bulgarian_words(amount, as_words=False):
         if as_words:
             word_map = {
                 0: "нула", 1: "един", 2: "два", 3: "три", 4: "четири", 5: "пет",
-                6: "шест", 7: "седем", 8: "осем", 9: "девет"
+                6: "шест", 7: "седем", 8: "осем", 9: "девет", 10: "десет",
+                11: "единадесет", 12: "дванадесет", 13: "тринадесет", 14: "четиринадесет",
+                15: "петнадесет", 16: "шестнадесет", 17: "седемнадесет", 18: "осемнадесет",
+                19: "деветнадесет", 20: "двадесет", 30: "тридесет", 40: "четиридесет",
+                50: "петдесет", 60: "шестдесет", 70: "седемдесет", 80: "осемдесет",
+                90: "деветдесет"
             }
-            leva_words = f"{word_map.get(leva, leva)} лева"
+
+            def convert_to_words(n):
+                if n == 0:
+                    return "нула"
+                elif n <= 20:
+                    return word_map[n]
+                elif n < 100:
+                    tens, ones = divmod(n, 10)
+                    return word_map[tens * 10] + (" и " + word_map[ones] if ones else "")
+                elif n < 1000:
+                    hundreds, remainder = divmod(n, 100)
+                    hundreds_word = {
+                        1: "сто", 2: "двеста", 3: "триста", 4: "четиристотин",
+                        5: "петстотин", 6: "шестстотин", 7: "седемстотин",
+                        8: "осемстотин", 9: "деветстотин"
+                    }[hundreds]
+                    rest = convert_to_words(remainder)
+                    return f"{hundreds_word} и {rest}" if remainder else hundreds_word
+                else:
+                    return str(n)
+
+            leva_words = convert_to_words(leva)
+            return f"{leva_words} лв. и {stotinki:02d} ст."
+
         else:
             leva_words = f"{leva} лв."
-        if stotinki > 0:
-            return f"{leva_words} и {stotinki:02d} ст."
-        return leva_words
+            return f"{leva_words} и {stotinki:02d} ст." if stotinki > 0 else leva_words
+
     except:
         return ""
 

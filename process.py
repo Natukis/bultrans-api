@@ -126,10 +126,14 @@ def clean_recipient_name(line):
     return ' '.join(line.strip().split())
 
 def extract_service_line(lines):
-    for line in lines:
-        # אם השורה מכילה מילים שקשורות לשירות
+    for i, line in enumerate(lines):
         if re.search(r"(?i)(Service|услуга|agreement|based)", line):
-            return line.strip()
+            line = line.strip()
+            next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            # נבדוק אם השורה הבאה מכילה תאריך (כדי לא להכניס סכומים)
+            if re.search(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", next_line):
+                return f"{line} {next_line}"
+            return line
     return ""
 
 def extract_date_from_service(service_line):
@@ -363,6 +367,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         customer = extract_customer_info(text, row["SupplierName"])
         invoice_date_str, invoice_date_obj = extract_invoice_date(text)
         service_line = extract_service_line(text.splitlines())
+        print("💬 FINAL SERVICE LINE:", service_line)
         service_date_obj = None
 
         if service_line:

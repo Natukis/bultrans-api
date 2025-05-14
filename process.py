@@ -170,23 +170,27 @@ def extract_date_from_service(service_line):
 def build_service_description(service_line):
     import re
 
-    # הסרה של מספרי שורות כמו "1.", "1)", וכו'
-    service_line_cleaned = re.sub(r"^\s*\d+[\.\)]?\s*", "", service_line)
+    # שלב 1: חילוץ תאריך מתוך השירות
+    service_month = extract_date_from_service(service_line)
 
-    # חילוץ תאריך מתוך שורת השירות בלבד
-    service_month = extract_date_from_service(service_line_cleaned)
+    # שלב 2: מחיקה של תאריך מהשורה כדי לא להכניס אותו פעמיים
+    cleaned_line = re.sub(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", "", service_line)
+    cleaned_line = re.sub(r"(м\.?\s?[А-Яа-я]+\s?20\d{2})", "", cleaned_line, flags=re.IGNORECASE)
+    cleaned_line = re.sub(r"\b[А-Яа-я]+\s20\d{2}\b", "", cleaned_line, flags=re.IGNORECASE)
 
-    # תרגום לשם השירות (ניתן להחליף במפה קבועה אם יש)
-    service_text_only = re.sub(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", "", service_line_cleaned)
-    service_text_only = re.sub(r"(м\.?\s?[А-Яа-я]+\s?\d{4})", "", service_text_only, flags=re.IGNORECASE)
-    service_text_only = re.sub(r"\s{2,}", " ", service_text_only).strip()
+    # שלב 3: הסרה של מספרים ויחידות מיותרות
+    cleaned_line = re.sub(r"\b\d+(\.\d+)?\s?(лв|BGN|EUR|USD|ILS|GBP)?\b", "", cleaned_line)
+    cleaned_line = re.sub(r"\s{2,}", " ", cleaned_line).strip()
 
-    service_translated = auto_translate(service_text_only).strip()
+    # שלב 4: תרגום התיאור בלבד
+    translated_service = auto_translate(cleaned_line).strip()
 
+    # שלב 5: הרכבת התוצאה הסופית
     if service_month:
-        return f"{service_translated} м.{service_month}"
+        return f"{translated_service} м.{service_month}"
     else:
-        return service_translated
+        return translated_service
+
 
 def extract_service_row_number(service_line):
     match = re.match(r"^\s*(\d+)[\.\)]?\s*", service_line)

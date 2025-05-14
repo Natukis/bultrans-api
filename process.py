@@ -360,12 +360,12 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
 
         # ננסה לחלץ תאריך משורת השירות
         if service_line:
-        match = re.search(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", service_line)
-        if match:
-        try:
-            service_date_obj = datetime.datetime.strptime(match.group(0).replace('/', '.').replace('-', '.'), "%d.%m.%Y")
-        except:
-            service_date_obj = None
+            match = re.search(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", service_line)
+            if match:
+                try:
+                    service_date_obj = datetime.datetime.strptime(match.group(0).replace('/', '.').replace('-', '.'), "%d.%m.%Y")
+                except:
+                    service_date_obj = None
 
         # מיפוי חודשים בולגריים
         bg_months = {

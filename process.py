@@ -136,6 +136,12 @@ def extract_service_line(lines):
             return line
     return ""
 
+def extract_vat_percent(text):
+    match = re.search(r"(?i)VAT(?: Rate)?:\s*([0-9]{1,2})%", text)
+    if match:
+        return int(match.group(1))
+    return 0  # ברירת מחדל אם לא נמצא
+
 def extract_date_from_service(service_line):
     print(f"📥 Checking line for date: {service_line}")
     patterns = [
@@ -406,7 +412,8 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         amount = extract_amount(text)  # זה הסכום המקורי מהחשבונית
         unit_price = extract_unit_price(currency_code, date_obj)
         line_total = round(amount * unit_price, 2)
-        vat_amount = round(line_total * 0.2, 2)
+        vat_percent = extract_vat_percent(text)
+        vat_amount = round(line_total * (vat_percent / 100), 2)
         total_bgn = round(line_total + vat_amount, 2)
         invoice_number = f"{int(row['Last invoice number']) + 1:08d}"
         df.at[row.name, "Last invoice number"] += 1

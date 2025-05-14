@@ -415,6 +415,8 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         amount = extract_amount(text)  # זה הסכום המקורי מהחשבונית
         unit_price = extract_unit_price(currency_code, date_obj)
         line_total = round(amount * unit_price, 2)
+        print("🧾 Full text for VAT extract:")
+        print(text)
         vat_percent = extract_vat_percent(text)
         vat_amount = round(line_total * (vat_percent / 100), 2)
         total_bgn = round(line_total + vat_amount, 2)

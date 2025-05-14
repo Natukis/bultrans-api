@@ -137,14 +137,15 @@ def extract_service_line(lines):
     return ""
 
 def extract_vat_percent(text):
-    # מאחד את השורות כדי לזהות תבניות מבוזרות
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     for i, line in enumerate(lines):
-        if "VAT Rate" in line and i + 1 < len(lines):
-            next_line = lines[i + 1]
-            match = re.search(r"([0-9]{1,2})%", next_line)
-            if match:
-                return int(match.group(1))
+        if "VAT Rate" in line:
+            # נבדוק עד 4 שורות קדימה כדי למצוא אחוז
+            for j in range(1, 5):
+                if i + j < len(lines):
+                    match = re.search(r"([0-9]{1,2})%", lines[i + j])
+                    if match:
+                        return int(match.group(1))
     return 0
 
 def extract_date_from_service(service_line):

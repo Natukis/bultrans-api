@@ -80,36 +80,52 @@ def number_to_bulgarian_words(amount, as_words=False):
                 90: "деветдесет"
             }
 
-            def convert_to_words(n):
-                if n == 0:
-                    return "нула"
-                elif n <= 20:
-                    return word_map[n]
-                elif n < 100:
-                    tens, ones = divmod(n, 10)
-                    return word_map[tens * 10] + (" и " + word_map[ones] if ones else "")
-                elif n < 1000:
-                    hundreds, remainder = divmod(n, 100)
+                   def convert_to_words(n):
+            if n == 0:
+                return "нула"
+
+            parts = []
+
+            thousands = n // 1000
+            remainder = n % 1000
+
+            if thousands:
+                if thousands == 1:
+                    parts.append("хиляда")
+                elif thousands == 2:
+                    parts.append("две хиляди")
+                elif 3 <= thousands <= 9:
+                    parts.append(f"{word_map[thousands]} хиляди")
+                else:
+                    parts.append(f"{convert_to_words(thousands)} хиляди")
+
+            if remainder:
+                if remainder <= 20:
+                    parts.append(word_map[remainder])
+                elif remainder < 100:
+                    tens, ones = divmod(remainder, 10)
+                    tens_word = word_map[tens * 10]
+                    ones_word = word_map[ones] if ones else ""
+                    if ones:
+                        parts.append(f"{tens_word} и {ones_word}")
+                    else:
+                        parts.append(tens_word)
+                else:
+                    hundreds, rest = divmod(remainder, 100)
                     hundreds_word = {
                         1: "сто", 2: "двеста", 3: "триста", 4: "четиристотин",
                         5: "петстотин", 6: "шестстотин", 7: "седемстотин",
                         8: "осемстотин", 9: "деветстотин"
                     }[hundreds]
-                    rest = convert_to_words(remainder)
-                    return f"{hundreds_word} и {rest}" if remainder else hundreds_word
-                else:
-                    return str(n)
+                    if rest:
+                        parts.append(f"{hundreds_word} и {convert_to_words(rest)}")
+                    else:
+                        parts.append(hundreds_word)
 
-            leva_words = convert_to_words(leva)
-            return f"{leva_words} лв. и {stotinki:02d} ст."
+            return " ".join(parts)
 
-        else:
-            leva_words = f"{leva} лв."
-            return f"{leva_words} и {stotinki:02d} ст." if stotinki > 0 else leva_words
-
-    except Exception as e:
-        print(f"Error in number_to_bulgarian_words: {e}")
-        return ""
+        leva_words = convert_to_words(leva)
+        return f"{leva_words} лв. и {stotinki:02d} ст."
 
 def extract_invoice_date(text):
     patterns = [

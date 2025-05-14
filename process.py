@@ -358,14 +358,14 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         service_line = extract_service_line(text.splitlines())
         service_date_obj = None
 
-        # ננסה לחלץ תאריך משורת השירות
-        if service_line:
-            match = re.search(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", service_line)
-            if match:
-                try:
-                    service_date_obj = datetime.datetime.strptime(match.group(0).replace('/', '.').replace('-', '.'), "%d.%m.%Y")
-                except:
-                    service_date_obj = None
+if service_line:
+    extracted = extract_date_from_service(service_line)
+    print(f"📆 Extracted service date raw: '{extracted}'")  # 👈 הוספת לוג
+    try:
+        # ננסה לפרש את זה כתאריך אמיתי
+        service_date_obj = datetime.datetime.strptime(extracted.replace('м.', '').strip(), "%B %Y")
+    except:
+        service_date_obj = None
 
         # מיפוי חודשים בולגריים
         bg_months = {

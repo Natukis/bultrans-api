@@ -80,7 +80,7 @@ def number_to_bulgarian_words(amount, as_words=False):
                 90: "деветдесет"
             }
 
-                   def convert_to_words(n):
+def convert_to_words(n):
             if n == 0:
                 return "нула"
 

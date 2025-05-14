@@ -69,21 +69,6 @@ def number_to_bulgarian_words(amount, as_words=False):
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
-        if as_words:
-            word_map = {
-                0: "нула", 1: "един", 2: "два", 3: "три", 4: "четири", 5: "пет",
-                6: "шест", 7: "седем", 8: "осем", 9: "девет", 10: "десет",
-                11: "единадесет", 12: "дванадесет", 13: "тринадесет", 14: "четиринадесет",
-                15: "петнадесет", 16: "шестнадесет", 17: "седемнадесет", 18: "осемнадесет",
-                19: "деветнадесет", 20: "двадесет", 30: "тридесет", 40: "четиридесет",
-                50: "петдесет", 60: "шестдесет", 70: "седемдесет", 80: "осемдесет",
-                90: "деветдесет"
-            }
-
-def number_to_bulgarian_words(amount, as_words=False):
-    try:
-        leva = int(amount)
-        stotinki = int(round((amount - leva) * 100))
 
         if as_words:
             word_map = {

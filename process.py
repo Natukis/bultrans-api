@@ -167,32 +167,26 @@ def extract_date_from_service(service_line):
     print("⛔ No date found")
     return None
 
-
-def build_service_description(service_line, invoice_date):
+def build_service_description(service_line):
     import re
-    # הסרה של מספרים כמו "1 ", "1." וכו' מההתחלה
+
+    # הסרה של מספרי שורות כמו "1.", "1)", וכו'
     service_line_cleaned = re.sub(r"^\s*\d+[\.\)]?\s*", "", service_line)
 
-    # תרגום
-    service_line_translated = auto_translate(service_line_cleaned).strip()
+    # חילוץ תאריך מתוך שורת השירות בלבד
+    service_month = extract_date_from_service(service_line_cleaned)
 
-    # הסרת 'от' בסוף כדי למנוע כפילות
-    service_line_translated = re.sub(r"\bот\b[,\.]?\s*$", "", service_line_translated, flags=re.IGNORECASE).strip()
+    # תרגום לשם השירות (ניתן להחליף במפה קבועה אם יש)
+    service_text_only = re.sub(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", "", service_line_cleaned)
+    service_text_only = re.sub(r"(м\.?\s?[А-Яа-я]+\s?\d{4})", "", service_text_only, flags=re.IGNORECASE)
+    service_text_only = re.sub(r"\s{2,}", " ", service_text_only).strip()
 
-    # תאריך מהשורה
-    service_month = extract_date_from_service(service_line)
-
-    if not service_month and invoice_date:
-        bg_months = {
-            1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
-            7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"
-        }
-        service_month = f"{bg_months[invoice_date.month]} {invoice_date.year}"
+    service_translated = auto_translate(service_text_only).strip()
 
     if service_month:
-        return f"{service_line_translated} от м.{service_month}"
+        return f"{service_translated} м.{service_month}"
     else:
-        return service_line_translated
+        return service_translated
 
 def extract_service_row_number(service_line):
     match = re.match(r"^\s*(\d+)[\.\)]?\s*", service_line)

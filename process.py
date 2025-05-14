@@ -362,10 +362,15 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             extracted = extract_date_from_service(service_line)
             print(f"📆 Extracted service date raw: '{extracted}'")  # 👈 הוספת לוג
             try:
-                # ננסה לפרש את זה כתאריך אמיתי
-                service_date_obj = datetime.datetime.strptime(extracted.replace('м.', '').strip(), "%B %Y")
+                # ננסה לפרש כתאריך מלא קודם (14.7.2021)
+                service_date_obj = datetime.datetime.strptime(extracted.replace('/', '.').replace('-', '.').strip(), "%d.%m.%Y")
             except:
-                service_date_obj = None
+                try:
+                    # אם לא, ננסה חודש+שנה (м.Юли 2021)
+                    service_date_obj = datetime.datetime.strptime(extracted.replace('м.', '').strip(), "%B %Y")
+                except:
+                    service_date_obj = None
+
 
         # מיפוי חודשים בולגריים
         bg_months = {

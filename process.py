@@ -184,6 +184,12 @@ def build_service_description(service_line, invoice_date):
     else:
         return service_line_translated
 
+def extract_service_row_number(service_line):
+    match = re.match(r"^\s*(\d+)[\.\)]?\s*", service_line)
+    if match:
+        return int(match.group(1))
+    return 1  # ברירת מחדל אם לא נמצא מספר בתחילת השורה
+
 
 def safe_extract_float(text):
     match = re.search(r"(\d[\d\s,.]+)", text)
@@ -256,7 +262,10 @@ def extract_customer_info(text, supplier_name=""):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     service_line = extract_service_line(lines)
     service_date = extract_date_from_service(service_line)
-    service_translated = build_service_description(service_line, extract_invoice_date(text)[1])
+    invoice_date_obj = extract_invoice_date(text)[1]
+    service_translated = build_service_description(service_line, invoice_date_obj)
+    row_number = extract_service_row_number(service_line)
+
 
     customer = {
         "RecipientName": "",
@@ -265,7 +274,7 @@ def extract_customer_info(text, supplier_name=""):
         "RecipientAddress": "",
         "RecipientCity": "",
         "RecipientCountry": "",
-        "ServiceDescription": service_translated
+        "ServiceDescription": service_translated, "RN": row_number,
     }
 
     for line in lines:
@@ -378,6 +387,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "InvoiceNumber": invoice_number,
             "Date": date_str,
             "ServiceDescription": customer["ServiceDescription"],
+            "RN": customer["RN"],
             "Cur": currency_code,
             "Amount": amount,
             "UnitPrice": unit_price,

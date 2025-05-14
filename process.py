@@ -438,6 +438,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "LineTotal": line_total,
             "AmountBGN": line_total,
             "VATAmount": vat_amount,
+            "vat_percent": int((vat_amount / line_total) * 100) if line_total else 0,
             "TotalBGN": total_bgn,
             "ExchangeRate": unit_price,
             "TotalInWords": number_to_bulgarian_words(total_bgn, as_words=True),

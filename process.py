@@ -179,21 +179,26 @@ def clean_recipient_name(line):
     return ' '.join(line.strip().split())
 
 def extract_service_line(lines):
-    # נסה למצוא לפי מילות מפתח כמו קודם
     for i, line in enumerate(lines):
-        if re.search(r"(?i)(Service|услуга|agreement|based)", line):
+        if re.search(r"(?i)(Service|услуга|agreement|based|description)", line):
             line = line.strip()
-            next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
-            if re.search(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", next_line):
-                return f"{line} {next_line}"
-            return line
+            combined_line = line
 
-    # אם לא מצאנו כלום – נחפש שורה שנראית כמו שירות מתחת לטבלה
+            next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+
+            # נכלול את השורה הבאה אם היא לא סכום/תאריך והיא מספיק ארוכה
+            if next_line and not re.search(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", next_line) and len(next_line) > 10:
+                combined_line += " " + next_line
+
+            return combined_line
+
+    # אם לא מצאנו לפי מילות מפתח – נחפש שירות שמופיע כ"טקסט עם מספר בתחילת שורה"
     for line in lines:
         if re.match(r"^\d+\s+.+", line):  # למשל: 1 Consulting services...
-            return line
+            return line.strip()
 
     return ""
+
 
 
 def extract_vat_percent(text):

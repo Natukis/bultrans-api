@@ -343,7 +343,6 @@ def extract_customer_info(text, supplier_name=""):
     service_translated = build_service_description(service_line)
     row_number = extract_service_row_number(service_line)
 
-
     customer = {
         "RecipientName": "",
         "RecipientID": "",
@@ -351,7 +350,8 @@ def extract_customer_info(text, supplier_name=""):
         "RecipientAddress": "",
         "RecipientCity": "",
         "RecipientCountry": "",
-        "ServiceDescription": service_translated, "RN": row_number,
+        "ServiceDescription": service_translated,
+        "RN": row_number,
     }
 
     for line in lines:
@@ -377,17 +377,9 @@ def extract_customer_info(text, supplier_name=""):
                 customer["RecipientVAT"] = m.group(0)
 
         elif re.search(r"(?i)^Address:", line):
-             raw_address = line.split(":", 1)[-1].strip()
-             if not customer["RecipientAddress"]:  # רק אם עדיין ריק
+            raw_address = line.split(":", 1)[-1].strip()
+            if not customer["RecipientAddress"]:
                 customer["RecipientAddress"] = transliterate_to_bulgarian(raw_address)
-                 
-        for i, line in enumerate(lines):
-             if re.search(r"(?i)(Customer Name|Client)", line):
-                if i + 1 < len(lines):
-                    next_line = lines[i + 1].strip()
-                    if "Address" not in next_line and len(next_line) > 10 and not customer["RecipientAddress"]:
-                        customer["RecipientAddress"] = transliterate_to_bulgarian(next_line)
-         
 
         elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
             val = line.split(":", 1)[-1].strip() if ":" in line else line.strip()
@@ -397,6 +389,14 @@ def extract_customer_info(text, supplier_name=""):
             raw_country = line.split(":", 1)[-1].strip()
             if raw_country:
                 customer["RecipientCountry"] = auto_translate(raw_country)
+
+    # 🔍 אם עדיין אין כתובת — ננסה לקחת מהשורה שאחרי Customer Name
+    for i, line in enumerate(lines):
+        if re.search(r"(?i)(Customer Name|Client)", line):
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if "Address" not in next_line and len(next_line) > 10 and not customer["RecipientAddress"]:
+                    customer["RecipientAddress"] = transliterate_to_bulgarian(next_line)
 
     if not customer["RecipientCountry"]:
         customer["RecipientCountry"] = "България"

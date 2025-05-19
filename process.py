@@ -376,10 +376,17 @@ def extract_customer_info(text, supplier_name=""):
             if m:
                 customer["RecipientVAT"] = m.group(0)
 
-        elif re.search(r"(?i)(Address|Billing Address|Customer Name.*Address)", line):
-            raw_address = line.split(":", 1)[-1].strip()
-            customer["RecipientAddress"] = transliterate_to_bulgarian(raw_address)
-
+        elif re.search(r"(?i)^Address:", line):
+             raw_address = line.split(":", 1)[-1].strip()
+             if not customer["RecipientAddress"]:  # רק אם עדיין ריק
+                customer["RecipientAddress"] = transliterate_to_bulgarian(raw_address)
+        for i, line in enumerate(lines):
+             if re.search(r"(?i)(Customer Name|Client)", line):
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    if "Address" not in next_line and len(next_line) > 10 and not customer["RecipientAddress"]:
+                        customer["RecipientAddress"] = transliterate_to_bulgarian(next_line)
+         
 
         elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
             val = line.split(":", 1)[-1].strip() if ":" in line else line.strip()
@@ -480,6 +487,8 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         invoice_number = f"{int(row['Last invoice number']) + 1:08d}"
         df.at[row.name, "Last invoice number"] += 1
         df.to_excel(SUPPLIERS_PATH, index=False)
+        iban_raw = str(row["IBAN"]).strip().replace("IBAN:", "")
+        iban_clean = re.sub(r"\b(BG\d{2})\s+\1\b", r"\1", iban_raw)
         context = {
             "RecipientName": customer["RecipientName"],
             "RecipientID": customer["RecipientID"],
@@ -494,7 +503,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "SupplierCity": auto_translate(str(row["SupplierCity"])),
             "SupplierCountry": auto_translate(str(row.get("SupplierCountry", "България"))),
             "SupplierContactPerson": str(row["SupplierContactPerson"]),
-            "IBAN": row["IBAN"],
+            "IBAN": iban_clean,
             "BankName": auto_translate(str(row["Bankname"])),
             "BankCode": row.get("BankCode", ""),
             "InvoiceNumber": invoice_number,

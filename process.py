@@ -194,9 +194,9 @@ def extract_vat_percent(text):
     for i, line in enumerate(lines):
         if "VAT Rate" in line:
             # נבדוק עד 4 שורות קדימה כדי למצוא אחוז
-            for j in range(1, 5):
+            for j in range(0, 5):  # כולל השורה הנוכחית
                 if i + j < len(lines):
-                    match = re.search(r"([0-9]{1,2})%", lines[i + j])
+                    match = re.search(r"([0-9]{1,2})\s?%", lines[i + j])
                     if match:
                         return int(match.group(1))
     return 0
@@ -376,9 +376,10 @@ def extract_customer_info(text, supplier_name=""):
             if m:
                 customer["RecipientVAT"] = m.group(0)
 
-        elif re.search(r"(?i)(Address|Billing Address)", line):
+        elif re.search(r"(?i)(Customer Name|Client).*Address", line):
             raw_address = line.split(":", 1)[-1].strip()
             customer["RecipientAddress"] = transliterate_to_bulgarian(raw_address)
+
 
         elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
             val = line.split(":", 1)[-1].strip() if ":" in line else line.strip()
@@ -492,7 +493,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "SupplierAddress": auto_translate(str(row["SupplierAddress"]) + (", " + str(row["SupplierCountry"]) if pd.notna(row.get("SupplierCountry")) else "")),
             "SupplierCity": auto_translate(str(row["SupplierCity"])),
             "SupplierCountry": auto_translate(str(row.get("SupplierCountry", "България"))),
-            "SupplierContactPerson": auto_translate(str(row["SupplierContactPerson"])),
+            "SupplierContactPerson": str(row["SupplierContactPerson"]),
             "IBAN": row["IBAN"],
             "BankName": auto_translate(str(row["Bankname"])),
             "BankCode": row.get("BankCode", ""),

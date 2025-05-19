@@ -376,7 +376,7 @@ def extract_customer_info(text, supplier_name=""):
             if m:
                 customer["RecipientVAT"] = m.group(0)
 
-        elif re.search(r"(?i)(Customer Name|Client).*Address", line):
+        elif re.search(r"(?i)(Address|Billing Address|Customer Name.*Address)", line):
             raw_address = line.split(":", 1)[-1].strip()
             customer["RecipientAddress"] = transliterate_to_bulgarian(raw_address)
 

@@ -380,6 +380,7 @@ def extract_customer_info(text, supplier_name=""):
              raw_address = line.split(":", 1)[-1].strip()
              if not customer["RecipientAddress"]:  # רק אם עדיין ריק
                 customer["RecipientAddress"] = transliterate_to_bulgarian(raw_address)
+                 
         for i, line in enumerate(lines):
              if re.search(r"(?i)(Customer Name|Client)", line):
                 if i + 1 < len(lines):

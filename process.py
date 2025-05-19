@@ -511,7 +511,19 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         df.to_excel(SUPPLIERS_PATH, index=False)
         iban_raw = str(row["IBAN"]).strip().replace("IBAN:", "")
         iban_clean = re.sub(r"\b(BG\d{2})\s+\1\b", r"\1", iban_raw)
+        
+        service_lines = [{
+            "RN": customer["RN"],
+            "Code": "",
+            "ServiceDescription": customer["ServiceDescription"],
+            "Unit": "бр.",
+            "Amount": "1",
+            "UnitPrice": unit_price,
+            "LineTotal": line_total
+        }]
+
         context = {
+            "service_lines": service_lines,
             "RecipientName": customer["RecipientName"],
             "RecipientID": customer["RecipientID"],
             "RecipientVAT": customer["RecipientVAT"],
@@ -530,12 +542,6 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "BankCode": row.get("BankCode", ""),
             "InvoiceNumber": invoice_number,
             "Date": date_str,
-            "ServiceDescription": customer["ServiceDescription"],
-            "RN": customer["RN"],
-            "Cur": currency_code,
-            "Amount": amount,
-            "UnitPrice": unit_price,
-            "LineTotal": line_total,
             "AmountBGN": line_total,
             "VATAmount": vat_amount,
             "vat_percent": vat_percent,
@@ -545,6 +551,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "TransactionCountry": "България",
             "TransactionBasis": "По сметка"
         }
+
         tpl = DocxTemplate(TEMPLATE_PATH)
         tpl.render(context)
         output_filename = f"bulgarian_invoice_{invoice_number}.docx"

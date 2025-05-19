@@ -378,8 +378,17 @@ def extract_customer_info(text, supplier_name=""):
 
         elif re.search(r"(?i)^Address:", line):
             raw_address = line.split(":", 1)[-1].strip()
+            next_line = ""
+            current_index = lines.index(line)
+            if current_index + 1 < len(lines):
+                next_line_candidate = lines[current_index + 1].strip()
+                if len(next_line_candidate) > 5 and not re.search(r"(?i)(ID No|VAT|City|Country)", next_line_candidate):
+                    next_line = next_line_candidate
+
+            full_address = f"{raw_address} {next_line}".strip()
             if not customer["RecipientAddress"]:
-                customer["RecipientAddress"] = transliterate_to_bulgarian(raw_address)
+                customer["RecipientAddress"] = transliterate_to_bulgarian(full_address)
+
 
         elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
             val = line.split(":", 1)[-1].strip() if ":" in line else line.strip()

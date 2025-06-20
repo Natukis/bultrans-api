@@ -1,4 +1,3 @@
-
 import os
 import re
 import datetime
@@ -27,7 +26,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 router = APIRouter()
 
-# --- Core Helper Functions (Preserved & Verified) ---
+# --- Helper Functions (Preserved & Verified) ---
 
 def log(msg):
     print(f"[{datetime.datetime.now()}] {msg}", flush=True)
@@ -54,6 +53,7 @@ def transliterate_to_bulgarian(text):
     return "".join(table.get(char, char) for char in text)
 
 def number_to_bulgarian_words(amount, as_words=False):
+    # ⭐️ FIXED: Removed .capitalize() to match test expectations
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
@@ -85,7 +85,7 @@ def number_to_bulgarian_words(amount, as_words=False):
                         else:
                             parts.append(tens_word)
                 return " ".join(parts)
-            leva_words = convert_to_words(leva).capitalize()
+            leva_words = convert_to_words(leva)
             return f"{leva_words} лева и {stotinki:02d} стотинки"
         else:
             leva_words = f"{leva} лв."
@@ -139,16 +139,14 @@ def upload_to_drive(local_path, filename):
         log(f"❌ Google Drive upload failed: {e}")
         return None
 
-# --- New, Improved & Refactored Functions ---
+# --- New, Improved & Test-Compatible Functions ---
 
 def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
     if filename.lower().endswith(".pdf"):
         try:
             text = "\n".join(page.extract_text() or "" for page in PdfReader(file_path).pages)
-            if len(text.strip()) > 50:
-                log("Extracted structured text from PDF.")
-                return text
+            if len(text.strip()) > 50: return text
             log("Fallback to OCR.")
             return "\n".join(pytesseract.image_to_string(img, config='--psm 6') for img in convert_from_path(file_path, dpi=300))
         except Exception as e:
@@ -161,26 +159,21 @@ def extract_text_from_file(file_path, filename):
     return ""
 
 def clean_number(num_str):
+    # ⭐️ FIXED: Logic now handles both American (1,234.56) and European (1.234,56) formats.
     if not isinstance(num_str, str): return 0.0
     num_str = re.sub(r'[^\d\.,-]', '', num_str)
-    if ',' in num_str and '.' in num_str: num_str = num_str.replace(',', '')
-    elif ',' in num_str: num_str = num_str.replace('.', '').replace(',', '.')
+    if ',' in num_str and '.' in num_str:
+        if num_str.rfind(',') > num_str.rfind('.'):
+            # European format: 1.234,56 -> 1234.56
+            num_str = num_str.replace('.', '').replace(',', '.')
+        else:
+            # American format: 1,234.56 -> 1234.56
+            num_str = num_str.replace(',', '')
+    elif ',' in num_str:
+        # Assumes comma is decimal if it's the only separator
+        num_str = num_str.replace(',', '.')
     try: return float(num_str)
     except: return 0.0
-
-def extract_invoice_date(text):
-    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            raw_date = match.group(1)
-            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
-                try:
-                    dt = datetime.datetime.strptime(raw_date, fmt)
-                    return dt.strftime("%d.%m.%Y"), dt
-                except ValueError:
-                    continue
-    return "", None
 
 def extract_customer_details(text, supplier_name=""):
     details = {'name': '', 'vat': '', 'id': '', 'address': '', 'city': '', 'country': 'България'}
@@ -207,21 +200,34 @@ def extract_customer_details(text, supplier_name=""):
     return details
 
 def extract_service_lines(text):
+    # ⭐️ FIXED: Logic now ignores footer keywords like 'subtotal'
     service_items, lines = [], text.splitlines()
     item_regex = re.compile(r"^(?P<desc>.+?)\s{2,}.*?(?P<total>[\d,]+\.\d{2})$")
-    start_kw = ['description', 'descrizione', 'item', 'activity']
-    end_kw = ['subtotal', 'imponibile', 'total', 'thank you']
+    start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
+    end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax']
     in_table = False
     for line in lines:
         line_lower = line.lower().strip()
-        if any(k in line_lower for k in start_kw) and len(line_lower) < 50: in_table = True; continue
-        if any(k in line_lower for k in end_kw): in_table = False
-        if in_table or re.search(r'[\d,]+\.\d{2}$', line):
+        
+        # Check for end of table first to stop processing
+        if any(k in line_lower for k in end_kw):
+            in_table = False
+            continue
+
+        # Check for start of table
+        if any(k in line_lower for k in start_kw) and len(line_lower) < 50:
+            in_table = True
+            continue
+        
+        if in_table:
             match = item_regex.match(line.strip())
             if match:
                 desc = match.group('desc').strip()
+                # Additional check to ensure it's not a header-like line
                 if desc.lower() not in start_kw and len(desc) > 3:
                     service_items.append({'description': desc, 'line_total': clean_number(match.group('total'))})
+                    log(f"✅ Found structured line: {service_items[-1]}")
+
     if not service_items:
         log("No structured lines found. Falling back to generic description.")
         total = 0
@@ -230,7 +236,42 @@ def extract_service_lines(text):
              if m: total = clean_number(m[-1]); break
         if total > 0:
             service_items.append({'description': "Consulting services per invoice", 'line_total': total})
+            log(f"✅ Created generic line from total: {total}")
     return service_items
+
+# --- Compatibility Wrappers & Functions for Tests ---
+
+def extract_invoice_date(text):
+    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            raw_date = match.group(1)
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
+                try:
+                    dt = datetime.datetime.strptime(raw_date, fmt)
+                    return dt.strftime("%d.%m.%Y"), dt
+                except ValueError: continue
+    return "", None
+
+def extract_customer_info(text, supplier_name=""):
+    details = extract_customer_details(text, supplier_name)
+    return {
+        "RecipientName": transliterate_to_bulgarian(details.get('name')),
+        "RecipientID": details.get('id') or (details.get('vat', '').replace("BG", "")),
+        "RecipientVAT": details.get('vat'),
+        "RecipientAddress": transliterate_to_bulgarian(details.get('address')),
+        "RecipientCity": details.get('city'),
+        "RecipientCountry": details.get('country'),
+        "ServiceDescription": "", "RN": 1,
+    }
+
+def safe_extract_float(text):
+    return clean_number(text)
+
+def extract_amount(text):
+    items = extract_service_lines(text)
+    return sum(item['line_total'] for item in items) if items else 0.0
 
 # --- Main Endpoint ---
 
@@ -268,10 +309,8 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         total_original = sum(item['line_total'] for item in service_items)
         for i, item in enumerate(service_items):
             final_service_lines.append({
-                'RN': i + 1,
-                'ServiceDescription': auto_translate(item['description']),
-                'Cur': currency,
-                'Amount': item['line_total'],
+                'RN': i + 1, 'ServiceDescription': auto_translate(item['description']), 'Cur': currency,
+                'Amount': f"{item['line_total']:.2f}",
                 'UnitPrice': f"{exchange_rate:.5f}",
                 'LineTotal': round(item['line_total'] * exchange_rate, 2)
             })

@@ -174,20 +174,6 @@ def clean_number(num_str):
     try: return float(num_str)
     except: return 0.0
 
-def extract_invoice_date(text):
-    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            raw_date = match.group(1)
-            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
-                try:
-                    dt = datetime.datetime.strptime(raw_date, fmt)
-                    return dt, dt.strftime("%d.%m.%Y")
-                except:
-                    continue
-    return datetime.datetime.now(), datetime.datetime.now().strftime("%d.%m.%Y")
-
 def extract_customer_details(text):
     details = {'name': '', 'vat': '', 'address': '', 'city': '', 'country': 'България'}
     lines = text.splitlines()
@@ -210,13 +196,6 @@ def extract_customer_details(text):
             log(f"Found customer block: {details}")
             break
     return details
-    
-def extract_customer_info(text, supplier_name=""):
-    """
-    ⭐️ Wrapper function for backwards compatibility with test_process.py.
-    This function calls the new, cleaner extraction logic.
-    """
-    return extract_customer_details(text)
 
 def extract_service_lines(text):
     service_items, lines = [], text.splitlines()
@@ -245,6 +224,40 @@ def extract_service_lines(text):
             service_items.append({'description': "Consulting services per invoice", 'line_total': total})
             log(f"✅ Created generic line from total: {total}")
     return service_items
+
+# --- Compatibility Wrappers for Tests ---
+# ⭐️ הוספנו את החלק הזה כדי לתמוך בקבצי הבדיקות הישנים שלך ולמנוע שגיאות import
+
+def extract_invoice_date(text):
+    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            raw_date = match.group(1)
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
+                try:
+                    dt = datetime.datetime.strptime(raw_date, fmt)
+                    return dt, dt.strftime("%d.%m.%Y")
+                except:
+                    continue
+    now = datetime.datetime.now()
+    return now, now.strftime("%d.%m.%Y")
+
+def extract_customer_info(text, supplier_name=""):
+    return extract_customer_details(text)
+
+def safe_extract_float(text):
+    return clean_number(text)
+
+def extract_amount(text):
+    items = extract_service_lines(text)
+    return sum(item['line_total'] for item in items) if items else 0.0
+
+def extract_service_line(lines_list):
+    # This is a simplified wrapper. It returns the description of the first found line.
+    text = "\n".join(lines_list)
+    items = extract_service_lines(text)
+    return items[0]['description'] if items else ""
 
 # --- Main Endpoint ---
 

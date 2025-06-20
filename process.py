@@ -32,7 +32,6 @@ def log(msg):
     print(f"[{datetime.datetime.now()}] {msg}", flush=True)
 
 def auto_translate(text, target_lang="bg"):
-    log(f"[DEBUG] Translating text: '{text[:30]}...'")
     if not text or not isinstance(text, str) or not text.strip(): return text
     try:
         if any('\u0400' <= char <= '\u04FF' for char in text): return text
@@ -53,7 +52,6 @@ def transliterate_to_bulgarian(text):
     return "".join(table.get(char, char) for char in text)
 
 def number_to_bulgarian_words(amount, as_words=False):
-    # ⭐️ FIXED: Default parameter changed back to as_words=False
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
@@ -146,20 +144,16 @@ def extract_text_from_file(file_path, filename):
     if filename.lower().endswith(".pdf"):
         try:
             text = "\n".join(page.extract_text() or "" for page in PdfReader(file_path).pages)
-            if len(text.strip()) > 50:
-                log("Extracted structured text from PDF.")
-                return text
+            if len(text.strip()) > 50: return text
             log("Fallback to OCR.")
             return "\n".join(pytesseract.image_to_string(img, config='--psm 6') for img in convert_from_path(file_path, dpi=300))
         except Exception as e:
-            log(f"PDF extraction failed: {e}")
-            return ""
+            log(f"PDF extraction failed: {e}"); return ""
     elif filename.lower().endswith((".doc", ".docx")):
         try:
             return "\n".join([p.text for p in Document(file_path).paragraphs])
         except Exception as e:
-            log(f"DOCX extraction failed: {e}")
-            return ""
+            log(f"DOCX extraction failed: {e}"); return ""
     return ""
 
 def clean_number(num_str):
@@ -170,28 +164,48 @@ def clean_number(num_str):
     try: return float(num_str)
     except: return 0.0
 
-def extract_customer_details(text):
+def extract_customer_details(text, supplier_name=""):
+    # ⭐️ FIXED: Logic to properly extract name from the line and clean it.
     details = {'name': '', 'vat': '', 'address': '', 'city': '', 'country': 'България'}
     lines = text.splitlines()
-    customer_keywords = ['bill to', 'invoice to', 'spett.le', 'customer:', 'client:']
+    customer_keywords = ['customer name:', 'bill to:', 'invoice to:', 'spett.le', 'customer:', 'client:']
+    
     for i, line in enumerate(lines):
-        if any(keyword in line.lower() for keyword in customer_keywords):
-            for j in range(1, 5):
-                if i + j < len(lines):
-                    customer_line = lines[i + j].strip()
+        line_lower = line.lower()
+        for keyword in customer_keywords:
+            if keyword in line_lower:
+                # Extract name from the same line, after the keyword
+                try:
+                    raw_name = line.split(':', 1)[1].strip()
+                    if len(raw_name) > 2:
+                        # Clean the name
+                        if supplier_name:
+                            raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE).strip()
+                        raw_name = re.sub(r'(?i)supplier|vendor|company|firm', '', raw_name).strip()
+                        details['name'] = raw_name
+                except IndexError:
+                    pass # Name is likely on the next line, handled below
+                
+                # Search for other details in the following lines
+                for j in range(i + 1, min(i + 5, len(lines))):
+                    customer_line = lines[j].strip()
                     if not customer_line: continue
+
                     vat_match = re.search(r'(BG\d+)', customer_line, re.IGNORECASE)
                     if vat_match and not details['vat']:
                         details['vat'] = vat_match.group(1)
-                        if not details['name']: details['name'] = customer_line.split(vat_match.group(1))[0].strip()
+                    
+                    # If name was not on the keyword line, it's likely the first non-VAT line
                     elif not details['name']:
-                        details['name'] = customer_line
-                    elif not details['city']:
-                        details['address'] += f" {customer_line}"
-            details['address'] = details['address'].strip()
-            log(f"Found customer block: {details}")
-            break
+                         details['name'] = customer_line
+                    
+                    elif not details['address']: # If name and VAT found, rest is address
+                        details['address'] = customer_line
+                        
+                log(f"Found customer block: {details}")
+                return details
     return details
+
 
 def extract_service_lines(text):
     service_items, lines = [], text.splitlines()
@@ -224,7 +238,6 @@ def extract_service_lines(text):
 # --- Compatibility Wrappers & Functions for Tests ---
 
 def extract_invoice_date(text):
-    # ⭐️ FIXED: Returns (string, object) to match test expectations.
     patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -234,15 +247,13 @@ def extract_invoice_date(text):
                 try:
                     dt = datetime.datetime.strptime(raw_date, fmt)
                     return dt.strftime("%d.%m.%Y"), dt
-                except:
-                    continue
+                except: continue
     now = datetime.datetime.now()
     return now.strftime("%d.%m.%Y"), now
 
 def extract_customer_info(text, supplier_name=""):
-    # ⭐️ FIXED: Wrapper function that returns a dictionary with the keys expected by the tests.
-    details = extract_customer_details(text)
-    # Map new keys to old keys for test compatibility
+    # ⭐️ FIXED: Wrapper function now passes supplier_name and maps keys correctly.
+    details = extract_customer_details(text, supplier_name)
     return {
         "RecipientName": details.get('name'),
         "RecipientID": details.get('vat', '').replace("BG", ""),
@@ -250,8 +261,7 @@ def extract_customer_info(text, supplier_name=""):
         "RecipientAddress": details.get('address'),
         "RecipientCity": details.get('city'),
         "RecipientCountry": details.get('country'),
-        "ServiceDescription": "", # Return default value as tests might expect the key
-        "RN": 1, # Return default value
+        "ServiceDescription": "", "RN": 1,
     }
 
 def safe_extract_float(text):
@@ -278,7 +288,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         supplier_data = supplier_row.iloc[0]
 
         # --- Dynamic Data Extraction ---
-        customer_details = extract_customer_details(text)
+        customer_details = extract_customer_details(text, supplier_data["SupplierName"])
         service_items = extract_service_lines(text)
         main_date_str, main_date_obj = extract_invoice_date(text)
         

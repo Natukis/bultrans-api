@@ -166,34 +166,38 @@ def clean_number(num_str):
     except: return 0.0
 
 def extract_customer_details(text, supplier_name=""):
+    # ⭐️ FIXED: Reworked logic to find all details, including City.
     details = {'name': '', 'vat': '', 'address': '', 'city': '', 'country': 'България'}
     lines = text.splitlines()
-    customer_keywords = ['customer name:', 'bill to:', 'invoice to:', 'spett.le', 'customer:', 'client:']
-    for i, line in enumerate(lines):
+    
+    for line in lines:
         line_lower = line.lower()
-        for keyword in customer_keywords:
-            if keyword in line_lower:
-                try:
-                    raw_name = line.split(':', 1)[1].strip()
-                    if len(raw_name) > 2:
-                        if supplier_name:
-                            raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE).strip()
-                        raw_name = re.sub(r'(?i)supplier|vendor|company|firm', '', raw_name).strip()
-                        details['name'] = raw_name
-                except IndexError: pass
-                
-                for j in range(i + 1, min(i + 5, len(lines))):
-                    customer_line = lines[j].strip()
-                    if not customer_line: continue
-                    vat_match = re.search(r'(BG\d+)', customer_line, re.IGNORECASE)
-                    if vat_match and not details['vat']:
-                        details['vat'] = vat_match.group(1)
-                    elif not details['name']:
-                        details['name'] = customer_line
-                    elif not details['address']:
-                        details['address'] = customer_line
-                log(f"Found customer block: {details}")
-                return details
+        
+        # Using 'elif' to avoid re-matching the same line for different details
+        if "customer name:" in line_lower:
+            raw_name = line.split(':', 1)[1].strip()
+            if supplier_name:
+                raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE)
+            details['name'] = re.sub(r'(?i)\bsupplier\b', '', raw_name).strip()
+
+        elif "vat no:" in line_lower:
+            vat_match = re.search(r'(BG\d+)', line, re.IGNORECASE)
+            if vat_match:
+                details['vat'] = vat_match.group(1)
+        
+        elif "id no:" in line_lower and not details.get('id'):
+             id_match = re.search(r'\d+', line)
+             if id_match:
+                 details['id'] = id_match.group(0)
+
+        elif "address:" in line_lower:
+            details['address'] = line.split(':', 1)[1].strip()
+            
+        elif "city:" in line_lower:
+            city_name = line.split(':', 1)[1].strip()
+            details['city'] = auto_translate(city_name) # Translate the city
+
+    log(f"Found customer details: {details}")
     return details
 
 def extract_service_lines(text):
@@ -212,7 +216,6 @@ def extract_service_lines(text):
                 desc = match.group('desc').strip()
                 if desc.lower() not in start_kw and len(desc) > 3:
                     service_items.append({'description': desc, 'line_total': clean_number(match.group('total'))})
-                    log(f"✅ Found structured line: {service_items[-1]}")
     if not service_items:
         log("No structured lines found. Falling back to generic description.")
         total = 0
@@ -221,7 +224,6 @@ def extract_service_lines(text):
              if m: total = clean_number(m[-1]); break
         if total > 0:
             service_items.append({'description': "Consulting services per invoice", 'line_total': total})
-            log(f"✅ Created generic line from total: {total}")
     return service_items
 
 # --- Compatibility Wrappers & Functions for Tests ---
@@ -241,11 +243,10 @@ def extract_invoice_date(text):
     return now.strftime("%d.%m.%Y"), now
 
 def extract_customer_info(text, supplier_name=""):
-    # ⭐️ FIXED: Now applies transliteration inside to pass the tests.
     details = extract_customer_details(text, supplier_name)
     return {
         "RecipientName": transliterate_to_bulgarian(details.get('name')),
-        "RecipientID": details.get('vat', '').replace("BG", ""),
+        "RecipientID": details.get('id') or (details.get('vat', '').replace("BG", "")),
         "RecipientVAT": details.get('vat'),
         "RecipientAddress": transliterate_to_bulgarian(details.get('address')),
         "RecipientCity": details.get('city'),
@@ -309,7 +310,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         context = {
             "service_lines": final_service_lines, "InvoiceNumber": invoice_number, "Date": main_date_str,
             "RecipientName": transliterate_to_bulgarian(customer_details['name']) or "N/A",
-            "RecipientID": customer_details['vat'].replace("BG","") if customer_details['vat'] else "N/A",
+            "RecipientID": customer_details.get('id') or customer_details['vat'].replace("BG","") if customer_details['vat'] else "N/A",
             "RecipientVAT": customer_details['vat'] or "N/A",
             "RecipientAddress": transliterate_to_bulgarian(customer_details['address']) or "N/A",
             "RecipientCity": customer_details['city'] or "N/A", "RecipientCountry": customer_details['country'],

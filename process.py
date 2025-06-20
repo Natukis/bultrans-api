@@ -1,10 +1,10 @@
+
 import os
 import re
 import datetime
 import pandas as pd
 import requests
 import pytesseract
-import traceback
 from pdf2image import convert_from_path
 from fastapi import UploadFile, APIRouter
 from fastapi.responses import JSONResponse
@@ -12,12 +12,12 @@ from docxtpl import DocxTemplate
 from PyPDF2 import PdfReader
 from xml.etree import ElementTree as ET
 from docx import Document
+import traceback
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from tempfile import NamedTemporaryFile
 
-# --- Constants and Setup ---
 SUPPLIERS_PATH = "suppliers.xlsx"
 TEMPLATE_PATH = "BulTrans_Template_FinalFInal.docx"
 UPLOAD_DIR = "/tmp/uploads"
@@ -26,210 +26,123 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 router = APIRouter()
 
-# --- Helper Functions (Preserved & Verified) ---
-
 def log(msg):
-    print(f"[{datetime.datetime.now()}] {msg}", flush=True)
+    print(f"[BulTrans LOG] {msg}", flush=True)
 
 def auto_translate(text, target_lang="bg"):
-    # Preserved from original code
-    log(f"[DEBUG] Translating text: '{text[:30]}...'")
-    if not text or not isinstance(text, str) or not text.strip(): return text
+    print("[DEBUG] GOOGLE_API_KEY:", os.getenv("GOOGLE_API_KEY"))
+    if not text.strip():
+        return text
     try:
-        if any('\u0400' <= char <= '\u04FF' for char in text): return text
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
-            log("⚠️ Missing GOOGLE_API_KEY. Skipping translation.")
+            log("⚠️ Missing GOOGLE_API_KEY in environment variables")
             return text
         url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
         payload = {"q": text, "target": target_lang}
-        response = requests.post(url, json=payload, timeout=10)
-        return response.json()["data"]["translations"][0]["translatedText"] if response.status_code == 200 else text
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            return response.json()["data"]["translations"][0]["translatedText"]
+        else:
+            log(f"⚠️ Translation API error: {response.status_code} - {response.text}")
     except Exception as e:
         log(f"❌ Translation failed: {e}")
-        return text
+    return text
 
 def transliterate_to_bulgarian(text):
-    # Preserved from original code
-    table = { "a": "а", "b": "б", "c": "ц", "d": "д", "e": "е", "f": "ф", "g": "г", "h": "х", "i": "и", "j": "дж", "k": "к", "l": "л", "m": "м", "n": "н", "o": "о", "p": "п", "q": "кю", "r": "р", "s": "с", "t": "т", "u": "у", "v": "в", "w": "у", "x": "кс", "y": "й", "z": "з", "A": "А", "B": "Б", "C": "Ц", "D": "Д", "E": "Е", "F": "Ф", "G": "Г", "H": "Х", "I": "И", "J": "Дж", "K": "К", "L": "Л", "M": "М", "N": "Н", "O": "О", "P": "П", "Q": "Кю", "R": "Р", "S": "С", "T": "Т", "U": "У", "V": "В", "W": "У", "X": "Кс", "Y": "Й", "Z": "З", ".": ".", " ": " ", ",": ",", "-": "-", "&": "и"}
+    table = {
+        "a": "а", "b": "б", "c": "ц", "d": "д", "e": "е", "f": "ф",
+        "g": "г", "h": "х", "i": "и", "j": "дж", "k": "к", "l": "л",
+        "m": "м", "n": "н", "o": "о", "p": "п", "q": "кю", "r": "р",
+        "s": "с", "t": "т", "u": "у", "v": "в", "w": "у", "x": "кс",
+        "y": "й", "z": "з",
+        "A": "А", "B": "Б", "C": "Ц", "D": "Д", "E": "Е", "F": "Ф",
+        "G": "Г", "H": "Х", "I": "И", "J": "Дж", "K": "К", "L": "Л",
+        "M": "М", "N": "Н", "O": "О", "P": "П", "Q": "Кю", "R": "Р",
+        "S": "С", "T": "Т", "U": "У", "V": "В", "W": "У", "X": "Кс",
+        "Y": "Й", "Z": "З",
+        ".": ".", " ": " ", ",": ",", "-": "-", "&": "и"
+    }
     return "".join(table.get(char, char) for char in text)
 
-def number_to_bulgarian_words(amount, as_words=True):
-    # Preserved from original code
+def number_to_bulgarian_words(amount, as_words=False):
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
-        word_map = {0: "нула", 1: "един", 2: "два", 3: "три", 4: "четири", 5: "пет", 6: "шест", 7: "седем", 8: "осем", 9: "девет", 10: "десет", 11: "единадесет", 12: "дванадесет", 13: "тринадесет", 14: "четиринадесет", 15: "петнадесет", 16: "шестнадесет", 17: "седемнадесет", 18: "осемнадесет", 19: "деветнадесет", 20: "двадесет", 30: "тридесет", 40: "четиридесет", 50: "петдесет", 60: "шестдесет", 70: "седемдесет", 80: "осемдесет", 90: "деветдесет"}
-        def convert_to_words(n):
-            if n in word_map: return word_map[n]
-            parts = []
-            if n >= 1000:
-                thousands = n // 1000
-                if thousands == 1: parts.append("хиляда")
-                elif thousands == 2: parts.append("две хиляди")
-                else: parts.append(f"{convert_to_words(thousands)} хиляди")
-                n %= 1000
-            if n >= 100:
-                hundreds_map = {1: "сто", 2: "двеста", 3: "триста", 4: "четиристотин", 5: "петстотин", 6: "шестстотин", 7: "седемстотин", 8: "осемстотин", 9: "деветстотин"}
-                hundreds = n // 100
-                parts.append(hundreds_map.get(hundreds))
-                n %= 100
-            if n > 0:
-                if n <= 20:
-                    parts.append(word_map[n])
-                else:
-                    tens = n // 10 * 10
-                    ones = n % 10
-                    tens_word = word_map[tens]
-                    if ones > 0:
-                        parts.append(f"{tens_word} и {word_map[ones]}")
-                    else:
-                        parts.append(tens_word)
-            return " ".join(parts)
-        leva_words = convert_to_words(leva).capitalize()
+
         if as_words:
-            return f"{leva_words} лева и {stotinki:02d} стотинки"
-        return f"{leva_words} лв. и {stotinki:02d} ст."
+            word_map = {
+                0: "нула", 1: "един", 2: "два", 3: "три", 4: "четири", 5: "пет",
+                6: "шест", 7: "седем", 8: "осем", 9: "девет", 10: "десет",
+                11: "единадесет", 12: "дванадесет", 13: "тринадесет", 14: "четиринадесет",
+                15: "петнадесет", 16: "шестнадесет", 17: "седемнадесет", 18: "осемнадесет",
+                19: "деветнадесет", 20: "двадесет", 30: "тридесет", 40: "четиридесет",
+                50: "петдесет", 60: "шестдесет", 70: "седемдесет", 80: "осемдесет",
+                90: "деветдесет"
+            }
+
+            def convert_to_words(n):
+                if n == 0:
+                    return "нула"
+
+                parts = []
+
+                thousands = n // 1000
+                remainder = n % 1000
+
+                if thousands:
+                    if thousands == 1:
+                        parts.append("хиляда")
+                    elif thousands == 2:
+                        parts.append("две хиляди")
+                    elif 3 <= thousands <= 9:
+                        parts.append(f"{word_map[thousands]} хиляди")
+                    else:
+                        parts.append(f"{convert_to_words(thousands)} хиляди")
+
+                if remainder:
+                    if remainder <= 20:
+                        parts.append(word_map[remainder])
+                    elif remainder < 100:
+                        tens, ones = divmod(remainder, 10)
+                        tens_word = word_map[tens * 10]
+                        ones_word = word_map[ones] if ones else ""
+                        if ones:
+                            parts.append(f"{tens_word} и {ones_word}")
+                        else:
+                            parts.append(tens_word)
+                    else:
+                        hundreds, rest = divmod(remainder, 100)
+                        hundreds_word = {
+                            1: "сто", 2: "двеста", 3: "триста", 4: "четиристотин",
+                            5: "петстотин", 6: "шестстотин", 7: "седемстотин",
+                            8: "осемстотин", 9: "деветстотин"
+                        }[hundreds]
+                        if rest:
+                            parts.append(f"{hundreds_word} и {convert_to_words(rest)}")
+                        else:
+                            parts.append(hundreds_word)
+
+                return " ".join(parts)
+
+            leva_words = convert_to_words(leva)
+            return f"{leva_words} лв. и {stotinki:02d} ст."
+
+        else:
+            leva_words = f"{leva} лв."
+            return f"{leva_words} и {stotinki:02d} ст." if stotinki > 0 else leva_words
+
     except Exception as e:
-        log(f"Error in number_to_bulgarian_words: {e}")
+        print(f"Error in number_to_bulgarian_words: {e}")
         return ""
 
-def fetch_exchange_rate(date_obj, currency_code):
-    # Preserved from original code
-    if currency_code.upper() == "EUR": return 1.95583
-    if currency_code.upper() == "BGN": return 1.0
-    try:
-        url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml&search=true&date={date_obj.strftime('%d.%m.%Y')}"
-        log(f"Fetching exchange rate for {currency_code} on {date_obj.strftime('%d.%m.%Y')}")
-        response = requests.get(url, timeout=10)
-        if response.status_code != 200: return 1.95583
-        root = ET.fromstring(response.content)
-        for row in root.findall(".//ROW"):
-            if row.find("CODE").text == currency_code.upper():
-                rate = float(row.find("RATE").text.replace(",", "."))
-                ratio = float(row.find("RATIO").text.replace(",", "."))
-                return rate / ratio
-        return 1.95583
-    except Exception as e:
-        log(f"Exchange rate fetch failed: {e}. Defaulting.")
-        return 1.95583
-
-def get_drive_service():
-    # Preserved from original code
-    creds_json = os.getenv("GOOGLE_CREDS_JSON")
-    if not creds_json: raise ValueError("Missing GOOGLE_CREDS_JSON")
-    with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as tf:
-        tf.write(creds_json)
-        path = tf.name
-    try:
-        creds = service_account.Credentials.from_service_account_file(path, scopes=["https://www.googleapis.com/auth/drive"])
-        return build("drive", "v3", credentials=creds)
-    finally:
-        os.remove(path)
-
-def upload_to_drive(local_path, filename):
-    # Preserved from original code
-    log(f"Uploading '{filename}' to Google Drive...")
-    try:
-        service = get_drive_service()
-        file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
-        media = MediaFileUpload(local_path, resumable=True)
-        file = service.files().create(body=file_metadata, media_body=media, fields="id, webViewLink").execute()
-        service.permissions().create(fileId=file["id"], body={"type": "anyone", "role": "reader"}).execute()
-        link = file.get("webViewLink")
-        log(f"Successfully uploaded. Link: {link}")
-        return link
-    except Exception as e:
-        log(f"❌ Google Drive upload failed: {e}")
-        return None
-
-# --- New & Improved Extraction Functions ---
-
-def extract_text_from_file(file_path, filename):
-    log(f"Extracting text from '{filename}'")
-    if filename.lower().endswith(".pdf"):
-        try:
-            text = "\n".join(page.extract_text() or "" for page in PdfReader(file_path).pages)
-            if len(text.strip()) > 50:
-                log("Extracted structured text from PDF.")
-                return text
-            log("Fallback to OCR.")
-            return "\n".join(pytesseract.image_to_string(img, config='--psm 6') for img in convert_from_path(file_path, dpi=300))
-        except Exception as e:
-            log(f"PDF extraction failed: {e}")
-            return ""
-    elif filename.lower().endswith((".doc", ".docx")):
-        try:
-            return "\n".join([p.text for p in Document(file_path).paragraphs])
-        except Exception as e:
-            log(f"DOCX extraction failed: {e}")
-            return ""
-    return ""
-
-def clean_number(num_str):
-    if not isinstance(num_str, str): return 0.0
-    num_str = re.sub(r'[^\d\.,-]', '', num_str)
-    if ',' in num_str and '.' in num_str: num_str = num_str.replace(',', '')
-    elif ',' in num_str: num_str = num_str.replace('.', '').replace(',', '.')
-    try: return float(num_str)
-    except: return 0.0
-
-def extract_customer_details(text):
-    details = {'name': '', 'vat': '', 'address': '', 'city': '', 'country': 'България'}
-    lines = text.splitlines()
-    customer_keywords = ['bill to', 'invoice to', 'spett.le', 'customer:', 'client:']
-    for i, line in enumerate(lines):
-        if any(keyword in line.lower() for keyword in customer_keywords):
-            for j in range(1, 5):
-                if i + j < len(lines):
-                    customer_line = lines[i + j].strip()
-                    if not customer_line: continue
-                    vat_match = re.search(r'(BG\d+)', customer_line, re.IGNORECASE)
-                    if vat_match and not details['vat']:
-                        details['vat'] = vat_match.group(1)
-                        if not details['name']: details['name'] = customer_line.split(vat_match.group(1))[0].strip()
-                    elif not details['name']:
-                        details['name'] = customer_line
-                    elif not details['city']:
-                        details['address'] += f" {customer_line}"
-            details['address'] = details['address'].strip()
-            log(f"Found customer block: {details}")
-            break
-    return details
-
-def extract_service_lines(text):
-    service_items, lines = [], text.splitlines()
-    item_regex = re.compile(r"^(?P<desc>.+?)\s{2,}.*?(?P<total>[\d,]+\.\d{2})$")
-    start_kw = ['description', 'descrizione', 'item', 'activity']
-    end_kw = ['subtotal', 'imponibile', 'total', 'thank you']
-    in_table = False
-    for line in lines:
-        line_lower = line.lower().strip()
-        if any(k in line_lower for k in start_kw) and len(line_lower) < 50: in_table = True; continue
-        if any(k in line_lower for k in end_kw): in_table = False
-        if in_table or re.search(r'[\d,]+\.\d{2}$', line):
-            match = item_regex.match(line.strip())
-            if match:
-                desc = match.group('desc').strip()
-                if desc.lower() not in start_kw and len(desc) > 3:
-                    service_items.append({'description': desc, 'line_total': clean_number(match.group('total'))})
-                    log(f"✅ Found structured line: {service_items[-1]}")
-    if not service_items:
-        log("No structured lines found. Falling back to generic description.")
-        total = 0
-        for p in [r'(?:Total|Totale|AMOUNT DUE)[\s:€$]*([\d,]+\.\d{2})']:
-             m = re.findall(p, text, re.IGNORECASE)
-             if m: total = clean_number(m[-1]); break
-        if total > 0:
-            service_items.append({'description': "Consulting services per invoice", 'line_total': total})
-            log(f"✅ Created generic line from total: {total}")
-    return service_items
-
-# --- Compatibility Wrappers for Tests ---
-# ⭐️ הוספנו את החלק הזה כדי לתמוך בקבצי הבדיקות הישנים שלך ולמנוע שגיאות import
-
 def extract_invoice_date(text):
-    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
+    patterns = [
+        r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})",
+        r"(\d{2}\.\d{2}\.\d{4})",
+        r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})",
+        r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4})"
+    ]
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
@@ -237,95 +150,406 @@ def extract_invoice_date(text):
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
                 try:
                     dt = datetime.datetime.strptime(raw_date, fmt)
-                    return dt, dt.strftime("%d.%m.%Y")
+                    return dt.strftime("%d.%m.%Y"), dt
                 except:
                     continue
-    now = datetime.datetime.now()
-    return now, now.strftime("%d.%m.%Y")
+    return "", None
 
-def extract_customer_info(text, supplier_name=""):
-    return extract_customer_details(text)
+def extract_text_from_pdf(file_path):
+    try:
+        reader = PdfReader(file_path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        if text.strip(): return text
+        images = convert_from_path(file_path)
+        return "\n".join(pytesseract.image_to_string(img) for img in images)
+    except Exception as e:
+        log(f"PDF text extraction failed: {e}")
+        return ""
+
+def extract_text_from_docx(file_path):
+    try:
+        doc = Document(file_path)
+        return "\n".join([para.text for para in doc.paragraphs])
+    except Exception as e:
+        log(f"DOCX text extraction failed: {e}")
+        return ""
+
+def clean_recipient_name(line):
+    line = line.replace("Supplier", "").replace("Customer", "").replace("Client", "")
+    return ' '.join(line.strip().split())
+
+def extract_service_line(lines):
+    for i, line in enumerate(lines):
+        if re.search(r"(?i)(Service|услуга|agreement|based|description)", line):
+            line = line.strip()
+            combined_line = line
+
+            next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+
+            # נכלול את השורה הבאה אם היא לא סכום/תאריך והיא מספיק ארוכה
+            if next_line and not re.search(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", next_line) and len(next_line) > 10:
+                combined_line += " " + next_line
+
+            return combined_line
+
+    # אם לא מצאנו לפי מילות מפתח – נחפש שירות שמופיע כ"טקסט עם מספר בתחילת שורה"
+    for line in lines:
+        if re.match(r"^\d+\s+.+", line):  # למשל: 1 Consulting services...
+            return line.strip()
+
+    return ""
+
+
+
+def extract_vat_percent(text):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for i, line in enumerate(lines):
+        if "VAT Rate" in line:
+            # נבדוק עד 4 שורות קדימה כדי למצוא אחוז
+            for j in range(0, 5):  # כולל השורה הנוכחית
+                if i + j < len(lines):
+                    match = re.search(r"([0-9]{1,2})\s?%", lines[i + j])
+                    if match:
+                        return int(match.group(1))
+    return 0
+
+def extract_date_from_service(service_line):
+    print(f"📥 Checking line for date: {service_line}")
+    patterns = [
+        r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b",         # 14.7.2021 או 14/07/2021
+        r"(м\.?\s?[А-Яа-я]+\s?20\d{2})",                # м.Август 2021
+        r"\b[А-Яа-я]+\s20\d{2}\b"                       # Август 2021
+    ]
+    bg_months = {
+        1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
+        7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"
+    }
+    for pattern in patterns:
+        match = re.search(pattern, service_line)
+        if match:
+            raw = match.group(0).replace('/', '.').replace('-', '.').strip()
+            print(f"🔎 Found raw date: {raw}")
+            parts = raw.split(".")
+            if len(parts) == 3:
+                day = parts[0].zfill(2)
+                month = parts[1].zfill(2)
+                year = parts[2]
+                normalized_date = f"{day}.{month}.{year}"
+                try:
+                    dt = datetime.datetime.strptime(normalized_date, "%d.%m.%Y")
+                    result = f"{bg_months[dt.month]} {dt.year}"
+                    print(f"✅ Parsed as: {result}")
+                    return result
+                except:
+                    pass
+            fallback = raw.replace("м.", "").strip().capitalize()
+            print(f"⚠️ Fallback to raw: {fallback}")
+            return fallback
+    print("⛔ No date found")
+    return None
+
+def build_service_description(service_line):
+    import re
+
+    # שלב 1: חילוץ תאריך מתוך השירות
+    service_month = extract_date_from_service(service_line)
+
+    # שלב 2: מחיקה של תאריך מהשורה כדי לא להכניס אותו פעמיים
+    cleaned_line = re.sub(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", "", service_line)
+    cleaned_line = re.sub(r"(м\.?\s?[А-Яа-я]+\s?20\d{2})", "", cleaned_line, flags=re.IGNORECASE)
+    cleaned_line = re.sub(r"\b[А-Яа-я]+\s20\d{2}\b", "", cleaned_line, flags=re.IGNORECASE)
+
+    # שלב 3: הסרה של מספרים ויחידות מיותרות
+    cleaned_line = re.sub(r"\b\d+(\.\d+)?\s?(лв|BGN|EUR|USD|ILS|GBP)?\b", "", cleaned_line)
+    cleaned_line = re.sub(r"\s{2,}", " ", cleaned_line).strip()
+
+    # שלב 4: תרגום התיאור בלבד
+    translated_service = auto_translate(cleaned_line).strip()
+
+    # שלב 5: הרכבת התוצאה הסופית
+    if service_month:
+        return f"{translated_service} м.{service_month}"
+    else:
+        return translated_service
+
+
+def extract_service_row_number(service_line):
+    match = re.match(r"^\s*(\d+)[\.\)]?\s*", service_line)
+    if match:
+        return int(match.group(1))
+    return 1  # ברירת מחדל אם לא נמצא מספר בתחילת השורה
+
 
 def safe_extract_float(text):
-    return clean_number(text)
+    match = re.search(r"(\d[\d\s,.]+)", text)
+    if match:
+        try:
+            num = match.group(1).replace(" ", "").replace(",", "")
+            return float(num)
+        except:
+            return 0.0
+    return 0.0
 
 def extract_amount(text):
-    items = extract_service_lines(text)
-    return sum(item['line_total'] for item in items) if items else 0.0
+    for line in text.splitlines()[::-1]:  # עובר מהסוף להתחלה
+        if re.search(r"(?i)(total|subtotal|amount due|grand total)", line):
+            val = safe_extract_float(line)
+            if val > 0:
+                return val
+    return 0.0
 
-def extract_service_line(lines_list):
-    # This is a simplified wrapper. It returns the description of the first found line.
-    text = "\n".join(lines_list)
-    items = extract_service_lines(text)
-    return items[0]['description'] if items else ""
 
-# --- Main Endpoint ---
+    match = re.search(r"(\d[\d\s,.]+)", text)
+    if match:
+        try:
+            num = match.group(1).replace(" ", "").replace(",", "")
+            return float(num)
+        except:
+            return 0.0
+    return 0.0
+
+def extract_currency_code(text):
+    # מנסה לזהות את המטבע רק מהשורות שמכילות סכומים
+    lines = text.splitlines()
+    for line in lines:
+        if re.search(r"\b\d+[.,]?\d*\s*(BGN|EUR|USD|ILS|GBP)\b", line):
+            match = re.search(r"(BGN|EUR|USD|ILS|GBP)", line)
+            if match:
+                return match.group(1)
+    return "EUR"  # ברירת מחדל אם לא נמצא שום מטבע ברור
+
+def extract_quantity(text):
+    match = re.search(r"(\d+(?:\.\d+)?)(?=\s*(EUR|USD|ILS|BGN|GBP))", text)
+    if match:
+        return float(match.group(1))
+    return 1.0
+
+def fetch_exchange_rate(date_obj, currency_code):
+    try:
+        url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?download=xml&search=true&date={date_obj.strftime('%d.%m.%Y')}"
+        response = requests.get(url, timeout=5)
+        if response.status_code != 200:
+            return 1.0
+        root = ET.fromstring(response.content)
+        for row in root.findall(".//ROW"):
+            code = row.find("CODE").text
+            if code == currency_code.upper():
+                rate = row.find("RATE").text
+                return float(rate.replace(",", "."))
+    except Exception as e:
+        log(f"Exchange rate fetch failed: {e}")
+    return 1.0
+
+def extract_unit_price(currency_code, date_obj):
+    if currency_code == "EUR":
+        return 1.95583
+    elif currency_code == "BGN":
+        return 1.0
+    return fetch_exchange_rate(date_obj, currency_code)
+
+def extract_customer_info(text, supplier_name=""):
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    service_line = extract_service_line(lines)
+    service_date = extract_date_from_service(service_line)
+    invoice_date_obj = extract_invoice_date(text)[1]
+    service_translated = build_service_description(service_line)
+    row_number = extract_service_row_number(service_line)
+
+    customer = {
+        "RecipientName": "",
+        "RecipientID": "",
+        "RecipientVAT": "",
+        "RecipientAddress": "",
+        "RecipientCity": "",
+        "RecipientCountry": "",
+        "ServiceDescription": service_translated,
+        "RN": row_number,
+    }
+
+    for line in lines:
+        if re.search(r"(?i)(Customer Name|Bill To|Invoice To|Client)", line):
+            parts = line.split(":", 2)
+            if len(parts) >= 2:
+                raw_name = parts[1].split(":")[0].strip()
+                pattern = re.compile(re.escape(supplier_name), re.IGNORECASE)
+                raw_name = pattern.sub("", raw_name).strip()
+                raw_name = re.sub(r"(?i)supplier|vendor|company|firm", "", raw_name)
+                raw_name = clean_recipient_name(raw_name)
+                if raw_name:
+                    customer["RecipientName"] = transliterate_to_bulgarian(raw_name)
+
+        elif re.search(r"(?i)(ID No|Tax ID)", line):
+            m = re.search(r"\d+", line)
+            if m:
+                customer["RecipientID"] = m.group(0)
+
+        elif re.search(r"(?i)(VAT|VAT No)", line):
+            m = re.search(r"BG\d+", line)
+            if m:
+                customer["RecipientVAT"] = m.group(0)
+
+        elif re.search(r"(?i)^Address:", line):
+            raw_address = line.split(":", 1)[-1].strip()
+            next_line = ""
+            current_index = lines.index(line)
+            if current_index + 1 < len(lines):
+                next_line_candidate = lines[current_index + 1].strip()
+                if len(next_line_candidate) > 5 and not re.search(r"(?i)(ID No|VAT|City|Country)", next_line_candidate):
+                    next_line = next_line_candidate
+
+            full_address = f"{raw_address} {next_line}".strip()
+            if not customer["RecipientAddress"]:
+                customer["RecipientAddress"] = transliterate_to_bulgarian(full_address)
+
+
+        elif re.search(r"(?i)(City|Sofia|Plovdiv|Varna|Burgas)", line):
+            val = line.split(":", 1)[-1].strip() if ":" in line else line.strip()
+            customer["RecipientCity"] = auto_translate(val)
+
+        elif re.search(r"(?i)(Country|Location)", line):
+            raw_country = line.split(":", 1)[-1].strip()
+            if raw_country:
+                customer["RecipientCountry"] = auto_translate(raw_country)
+
+    # 🔍 אם עדיין אין כתובת — ננסה לקחת מהשורה שאחרי Customer Name
+    for i, line in enumerate(lines):
+        if re.search(r"(?i)(Customer Name|Client)", line):
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if "Address" not in next_line and len(next_line) > 10 and not customer["RecipientAddress"]:
+                    customer["RecipientAddress"] = transliterate_to_bulgarian(next_line)
+
+    if not customer["RecipientCountry"]:
+        customer["RecipientCountry"] = "България"
+
+    return customer
+
+def get_drive_service():
+    creds_json = os.getenv("GOOGLE_CREDS_JSON")
+    if not creds_json:
+        raise ValueError("Missing GOOGLE_CREDS_JSON")
+    with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as temp_file:
+        temp_file.write(creds_json)
+        temp_file.flush()
+        credentials = service_account.Credentials.from_service_account_file(
+            temp_file.name, scopes=["https://www.googleapis.com/auth/drive"]
+        )
+    return build("drive", "v3", credentials=credentials)
+
+def upload_to_drive(local_path, filename):
+    log("Uploading to Drive...")
+    service = get_drive_service()
+    file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
+    media = MediaFileUpload(local_path, resumable=True)
+    uploaded_file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    service.permissions().create(fileId=uploaded_file["id"], body={"type": "anyone", "role": "reader"}).execute()
+    return f"https://drive.google.com/file/d/{uploaded_file['id']}/view"
 
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     try:
-        log(f"--- Starting invoice processing for supplier: {supplier_id}, file: {file.filename} ---")
+        contents = await file.read()
         file_path = f"/tmp/{file.filename}"
-        with open(file_path, "wb") as f: f.write(await file.read())
-        text = extract_text_from_file(file_path, file.filename)
-        if not text: raise HTTPException(status_code=400, detail="Could not extract text from file.")
-
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        text = extract_text_from_pdf(file_path) if file.filename.endswith(".pdf") else extract_text_from_docx(file_path)
+        lines = text.splitlines()
         df = pd.read_excel(SUPPLIERS_PATH)
-        supplier_row = df[df["SupplierCompanyID"] == int(supplier_id)]
-        if supplier_row.empty: raise HTTPException(status_code=404, detail="Supplier not found")
-        supplier_data = supplier_row.iloc[0]
+        row = df[df["SupplierCompanyID"] == int(supplier_id)]
+        if row.empty:
+            return JSONResponse({"success": False, "error": "Supplier not found"}, status_code=400)
+        row = row.iloc[0]
+        customer = extract_customer_info(text, row["SupplierName"])
+        invoice_date_str, invoice_date_obj = extract_invoice_date(text)
+        service_line = extract_service_line(text.splitlines())
+        print("💬 FINAL SERVICE LINE:", service_line)
+        service_date_obj = None
 
-        # --- Dynamic Data Extraction ---
-        customer_details = extract_customer_details(text)
-        service_items = extract_service_lines(text)
-        main_date_obj, main_date_str = extract_invoice_date(text)
-        
-        if not service_items: raise HTTPException(status_code=400, detail="Could not find any service lines.")
-        
-        currency = 'EUR'
-        if '€' in text or 'EUR' in text.upper(): currency = 'EUR'
-        elif '$' in text or 'USD' in text.upper(): currency = 'USD'
-        
-        exchange_rate = fetch_exchange_rate(main_date_obj, currency)
-        
-        final_service_lines = []
-        total_original = sum(item['line_total'] for item in service_items)
-        for i, item in enumerate(service_items):
-            final_service_lines.append({
-                'RN': i + 1, 'ServiceDescription': auto_translate(item['description']), 'Cur': currency, 'Amount': item.get('quantity', 1),
-                'UnitPrice': round(item.get('unit_price', item['line_total']) * exchange_rate, 2),
-                'LineTotal': round(item['line_total'] * exchange_rate, 2),
-            })
+        if service_line:
+            extracted = extract_date_from_service(service_line)
+            print(f"📆 Extracted service date raw: '{extracted}'")  # 👈 הוספת לוג
+            try:
+                # ננסה לפרש כתאריך מלא קודם (14.7.2021)
+                service_date_obj = datetime.datetime.strptime(extracted.replace('/', '.').replace('-', '.').strip(), "%d.%m.%Y")
+            except:
+                try:
+                    # אם לא, ננסה חודש+שנה (м.Юли 2021)
+                    service_date_obj = datetime.datetime.strptime(extracted.replace('м.', '').strip(), "%B %Y")
+                except:
+                    service_date_obj = None
 
-        vat_percent = 20.0
-        base_bgn = round(total_original * exchange_rate, 2)
-        vat_bgn = round(base_bgn * (vat_percent / 100), 2)
-        total_bgn = base_bgn + vat_bgn
-        
-        invoice_number = f"{int(supplier_data.get('Last invoice number', 0)) + 1:08d}"
-        df.loc[df["SupplierCompanyID"] == int(supplier_id), "Last invoice number"] = int(invoice_number)
+
+        # מיפוי חודשים בולגריים
+        bg_months = {
+        1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни",
+        7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"
+    }
+
+        # בחירת התאריך שיוצג בחשבונית - עדיפות לתאריך מתוך השירות
+        if service_date_obj:
+            date_obj = service_date_obj
+        elif invoice_date_obj:
+            date_obj = invoice_date_obj
+        else:
+            date_obj = datetime.datetime.today()
+
+        # הצגת התאריך בתבנית "חודש מילולי + שנה"
+        date_str = invoice_date_obj.strftime("%d.%m.%Y") if invoice_date_obj else datetime.datetime.today().strftime("%d.%m.%Y")
+
+        currency_code = extract_currency_code(text)
+        log(f"🔎 Detected currency: {currency_code}")
+        amount = extract_amount(text)  # זה הסכום המקורי מהחשבונית
+        unit_price = extract_unit_price(currency_code, date_obj)
+        line_total = round(amount * unit_price, 2)
+        print("🧾 Full text for VAT extract:")
+        print(text)
+        vat_percent = extract_vat_percent(text)
+        vat_amount = round(line_total * (vat_percent / 100), 2)
+        total_bgn = round(line_total + vat_amount, 2)
+        invoice_number = f"{int(row['Last invoice number']) + 1:08d}"
+        df.at[row.name, "Last invoice number"] += 1
         df.to_excel(SUPPLIERS_PATH, index=False)
+        iban_raw = str(row["IBAN"]).strip().replace("IBAN:", "")
+        iban_clean = re.sub(r"\b(BG\d{2})\s+\1\b", r"\1", iban_raw)
+        
+        service_lines = [{
+            "RN": customer["RN"],
+            "Code": "",
+            "ServiceDescription": customer["ServiceDescription"],
+            "Unit": "бр.",
+            "Amount": "1",
+            "UnitPrice": unit_price,
+            "LineTotal": line_total
+        }]
 
         context = {
-            "service_lines": final_service_lines, "InvoiceNumber": invoice_number, "Date": main_date_str,
-            "RecipientName": transliterate_to_bulgarian(customer_details['name']) or "N/A",
-            "RecipientID": customer_details['vat'].replace("BG","") if customer_details['vat'] else "N/A",
-            "RecipientVAT": customer_details['vat'] or "N/A",
-            "RecipientAddress": transliterate_to_bulgarian(customer_details['address']) or "N/A",
-            "RecipientCity": customer_details['city'] or "N/A", "RecipientCountry": customer_details['country'],
-            "SupplierName": auto_translate(str(supplier_data["SupplierName"])),
-            "SupplierCompanyID": str(supplier_data["SupplierCompanyID"]),
-            "SupplierCompanyVAT": str(supplier_data["SupplierCompanyVAT"]),
-            "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])),
-            "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])),
-            "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]),
-            "IBAN": str(supplier_data["IBAN"]), "BankName": auto_translate(str(supplier_data["Bankname"])), "BankCode": str(supplier_data["BankCode"]),
-            "AmountBGN": f"{base_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
-            "VATAmount": f"{vat_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
-            "TotalBGN": f"{total_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
+            "service_lines": service_lines,
+            "RecipientName": customer["RecipientName"],
+            "RecipientID": customer["RecipientID"],
+            "RecipientVAT": customer["RecipientVAT"],
+            "RecipientAddress": f"{customer['RecipientAddress']}, {customer['RecipientCountry']}",
+            "RecipientCity": customer["RecipientCity"],
+            "RecipientCountry": customer["RecipientCountry"],
+            "SupplierName": auto_translate(str(row["SupplierName"])),
+            "SupplierCompanyID": str(row["SupplierCompanyID"]),
+            "SupplierCompanyVAT": str(row["SupplierCompanyVAT"]),
+            "SupplierAddress": auto_translate(str(row["SupplierAddress"]) + (", " + str(row["SupplierCountry"]) if pd.notna(row.get("SupplierCountry")) else "")),
+            "SupplierCity": auto_translate(str(row["SupplierCity"])),
+            "SupplierCountry": auto_translate(str(row.get("SupplierCountry", "България"))),
+            "SupplierContactPerson": str(row["SupplierContactPerson"]),
+            "IBAN": iban_clean,
+            "BankName": auto_translate(str(row["Bankname"])),
+            "BankCode": row.get("BankCode", ""),
+            "InvoiceNumber": invoice_number,
+            "Date": date_str,
+            "AmountBGN": line_total,
+            "VATAmount": vat_amount,
+            "vat_percent": vat_percent,
+            "TotalBGN": total_bgn,
+            "ExchangeRate": unit_price,
             "TotalInWords": number_to_bulgarian_words(total_bgn, as_words=True),
-            "ExchangeRate": exchange_rate,
-            "TransactionBasis": "По сметка", "TransactionCountry": "България"
+            "TransactionCountry": "България",
+            "TransactionBasis": "По сметка"
         }
 
         tpl = DocxTemplate(TEMPLATE_PATH)
@@ -333,12 +557,9 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         output_filename = f"bulgarian_invoice_{invoice_number}.docx"
         output_path = f"/tmp/{output_filename}"
         tpl.save(output_path)
-        log(f"Invoice '{output_filename}' created.")
-        
         drive_link = upload_to_drive(output_path, output_filename)
-        
         return JSONResponse({"success": True, "data": {"invoice_number": invoice_number, "drive_link": drive_link}})
-
     except Exception as e:
-        log(f"❌ GLOBAL EXCEPTION: {traceback.format_exc()}")
-        return JSONResponse({"success": False, "error": f"An unexpected error occurred: {e}"}, status_code=500)
+        log("❌ EXCEPTION OCCURRED:")
+        log(traceback.format_exc())
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)

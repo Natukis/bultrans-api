@@ -17,7 +17,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from tempfile import NamedTemporaryFile
 
-# --- קבועים והגדרות ---
+# --- Constants and Setup ---
 SUPPLIERS_PATH = "suppliers.xlsx"
 TEMPLATE_PATH = "BulTrans_Template_FinalFInal.docx"
 UPLOAD_DIR = "/tmp/uploads"
@@ -26,12 +26,13 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 router = APIRouter()
 
-# --- פונקציות עזר מהקוד המקורי (נשמרו ואומתו) ---
+# --- Helper Functions (Preserved & Verified) ---
 
 def log(msg):
     print(f"[{datetime.datetime.now()}] {msg}", flush=True)
 
 def auto_translate(text, target_lang="bg"):
+    # Preserved from original code
     log(f"[DEBUG] Translating text: '{text[:30]}...'")
     if not text or not isinstance(text, str) or not text.strip(): return text
     try:
@@ -47,12 +48,14 @@ def auto_translate(text, target_lang="bg"):
     except Exception as e:
         log(f"❌ Translation failed: {e}")
         return text
-        
+
 def transliterate_to_bulgarian(text):
+    # Preserved from original code
     table = { "a": "а", "b": "б", "c": "ц", "d": "д", "e": "е", "f": "ф", "g": "г", "h": "х", "i": "и", "j": "дж", "k": "к", "l": "л", "m": "м", "n": "н", "o": "о", "p": "п", "q": "кю", "r": "р", "s": "с", "t": "т", "u": "у", "v": "в", "w": "у", "x": "кс", "y": "й", "z": "з", "A": "А", "B": "Б", "C": "Ц", "D": "Д", "E": "Е", "F": "Ф", "G": "Г", "H": "Х", "I": "И", "J": "Дж", "K": "К", "L": "Л", "M": "М", "N": "Н", "O": "О", "P": "П", "Q": "Кю", "R": "Р", "S": "С", "T": "Т", "U": "У", "V": "В", "W": "У", "X": "Кс", "Y": "Й", "Z": "З", ".": ".", " ": " ", ",": ",", "-": "-", "&": "и"}
     return "".join(table.get(char, char) for char in text)
 
 def number_to_bulgarian_words(amount, as_words=True):
+    # Preserved from original code
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
@@ -92,6 +95,7 @@ def number_to_bulgarian_words(amount, as_words=True):
         return ""
 
 def fetch_exchange_rate(date_obj, currency_code):
+    # Preserved from original code
     if currency_code.upper() == "EUR": return 1.95583
     if currency_code.upper() == "BGN": return 1.0
     try:
@@ -111,6 +115,7 @@ def fetch_exchange_rate(date_obj, currency_code):
         return 1.95583
 
 def get_drive_service():
+    # Preserved from original code
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     if not creds_json: raise ValueError("Missing GOOGLE_CREDS_JSON")
     with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as tf:
@@ -123,6 +128,7 @@ def get_drive_service():
         os.remove(path)
 
 def upload_to_drive(local_path, filename):
+    # Preserved from original code
     log(f"Uploading '{filename}' to Google Drive...")
     try:
         service = get_drive_service()
@@ -137,7 +143,7 @@ def upload_to_drive(local_path, filename):
         log(f"❌ Google Drive upload failed: {e}")
         return None
 
-# --- פונקציות חילוץ חדשות ומשופרות ---
+# --- New & Improved Extraction Functions ---
 
 def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
@@ -169,9 +175,6 @@ def clean_number(num_str):
     except: return 0.0
 
 def extract_invoice_date(text):
-    """
-    ⭐️ פונקציה שהוחזרה: מחלצת תאריך ממספר פורמטים כדי לתמוך בבדיקות.
-    """
     patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -207,6 +210,13 @@ def extract_customer_details(text):
             log(f"Found customer block: {details}")
             break
     return details
+    
+def extract_customer_info(text, supplier_name=""):
+    """
+    ⭐️ Wrapper function for backwards compatibility with test_process.py.
+    This function calls the new, cleaner extraction logic.
+    """
+    return extract_customer_details(text)
 
 def extract_service_lines(text):
     service_items, lines = [], text.splitlines()
@@ -236,7 +246,7 @@ def extract_service_lines(text):
             log(f"✅ Created generic line from total: {total}")
     return service_items
 
-# --- הפונקציה הראשית והמשולבת ---
+# --- Main Endpoint ---
 
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
@@ -252,6 +262,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         if supplier_row.empty: raise HTTPException(status_code=404, detail="Supplier not found")
         supplier_data = supplier_row.iloc[0]
 
+        # --- Dynamic Data Extraction ---
         customer_details = extract_customer_details(text)
         service_items = extract_service_lines(text)
         main_date_obj, main_date_str = extract_invoice_date(text)

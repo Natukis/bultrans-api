@@ -1,3 +1,4 @@
+
 import os
 import re
 import datetime
@@ -26,7 +27,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 router = APIRouter()
 
-# --- Helper Functions (Preserved & Verified) ---
+# --- Core Helper Functions (Preserved & Verified) ---
 
 def log(msg):
     print(f"[{datetime.datetime.now()}] {msg}", flush=True)
@@ -138,14 +139,16 @@ def upload_to_drive(local_path, filename):
         log(f"❌ Google Drive upload failed: {e}")
         return None
 
-# --- New, Improved & Test-Compatible Functions ---
+# --- New, Improved & Refactored Functions ---
 
 def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
     if filename.lower().endswith(".pdf"):
         try:
             text = "\n".join(page.extract_text() or "" for page in PdfReader(file_path).pages)
-            if len(text.strip()) > 50: return text
+            if len(text.strip()) > 50:
+                log("Extracted structured text from PDF.")
+                return text
             log("Fallback to OCR.")
             return "\n".join(pytesseract.image_to_string(img, config='--psm 6') for img in convert_from_path(file_path, dpi=300))
         except Exception as e:
@@ -164,6 +167,20 @@ def clean_number(num_str):
     elif ',' in num_str: num_str = num_str.replace('.', '').replace(',', '.')
     try: return float(num_str)
     except: return 0.0
+
+def extract_invoice_date(text):
+    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            raw_date = match.group(1)
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
+                try:
+                    dt = datetime.datetime.strptime(raw_date, fmt)
+                    return dt.strftime("%d.%m.%Y"), dt
+                except ValueError:
+                    continue
+    return "", None
 
 def extract_customer_details(text, supplier_name=""):
     details = {'name': '', 'vat': '', 'id': '', 'address': '', 'city': '', 'country': 'България'}
@@ -215,42 +232,6 @@ def extract_service_lines(text):
             service_items.append({'description': "Consulting services per invoice", 'line_total': total})
     return service_items
 
-# --- Compatibility Wrappers & Functions for Tests ---
-
-def extract_invoice_date(text):
-    # ⭐️ FIXED: Restored original, stable version of this function.
-    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            raw_date = match.group(1)
-            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
-                try:
-                    dt = datetime.datetime.strptime(raw_date, fmt)
-                    return dt.strftime("%d.%m.%Y"), dt # Returns (string, object)
-                except ValueError:
-                    continue
-    return "", None # Return None if no date is found, as in original
-
-def extract_customer_info(text, supplier_name=""):
-    details = extract_customer_details(text, supplier_name)
-    return {
-        "RecipientName": transliterate_to_bulgarian(details.get('name')),
-        "RecipientID": details.get('id') or (details.get('vat', '').replace("BG", "")),
-        "RecipientVAT": details.get('vat'),
-        "RecipientAddress": transliterate_to_bulgarian(details.get('address')),
-        "RecipientCity": details.get('city'),
-        "RecipientCountry": details.get('country'),
-        "ServiceDescription": "", "RN": 1,
-    }
-
-def safe_extract_float(text):
-    return clean_number(text)
-
-def extract_amount(text):
-    items = extract_service_lines(text)
-    return sum(item['line_total'] for item in items) if items else 0.0
-
 # --- Main Endpoint ---
 
 @router.post("/process-invoice/")
@@ -272,7 +253,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         main_date_str, main_date_obj = extract_invoice_date(text)
         
         if not main_date_obj:
-            main_date_obj = datetime.datetime.now() # Fallback if no date is found
+            main_date_obj = datetime.datetime.now()
             main_date_str = main_date_obj.strftime("%d.%m.%Y")
         
         if not service_items: raise HTTPException(status_code=400, detail="Could not find any service lines.")

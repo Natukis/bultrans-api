@@ -218,6 +218,7 @@ def extract_service_lines(text):
 # --- Compatibility Wrappers & Functions for Tests ---
 
 def extract_invoice_date(text):
+    # ⭐️ FIXED: Restored original, stable version of this function.
     patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -226,10 +227,10 @@ def extract_invoice_date(text):
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
                 try:
                     dt = datetime.datetime.strptime(raw_date, fmt)
-                    return dt.strftime("%d.%m.%Y"), dt
-                except: continue
-    now = datetime.datetime.now()
-    return now.strftime("%d.%m.%Y"), now
+                    return dt.strftime("%d.%m.%Y"), dt # Returns (string, object)
+                except ValueError:
+                    continue
+    return "", None # Return None if no date is found, as in original
 
 def extract_customer_info(text, supplier_name=""):
     details = extract_customer_details(text, supplier_name)
@@ -269,6 +270,10 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         customer_details = extract_customer_details(text, supplier_data["SupplierName"])
         service_items = extract_service_lines(text)
         main_date_str, main_date_obj = extract_invoice_date(text)
+        
+        if not main_date_obj:
+            main_date_obj = datetime.datetime.now() # Fallback if no date is found
+            main_date_str = main_date_obj.strftime("%d.%m.%Y")
         
         if not service_items: raise HTTPException(status_code=400, detail="Could not find any service lines.")
         

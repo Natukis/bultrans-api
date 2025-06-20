@@ -168,6 +168,23 @@ def clean_number(num_str):
     try: return float(num_str)
     except: return 0.0
 
+def extract_invoice_date(text):
+    """
+    ⭐️ פונקציה שהוחזרה: מחלצת תאריך ממספר פורמטים כדי לתמוך בבדיקות.
+    """
+    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            raw_date = match.group(1)
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
+                try:
+                    dt = datetime.datetime.strptime(raw_date, fmt)
+                    return dt, dt.strftime("%d.%m.%Y")
+                except:
+                    continue
+    return datetime.datetime.now(), datetime.datetime.now().strftime("%d.%m.%Y")
+
 def extract_customer_details(text):
     details = {'name': '', 'vat': '', 'address': '', 'city': '', 'country': 'България'}
     lines = text.splitlines()
@@ -237,23 +254,15 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
 
         customer_details = extract_customer_details(text)
         service_items = extract_service_lines(text)
+        main_date_obj, main_date_str = extract_invoice_date(text)
+        
         if not service_items: raise HTTPException(status_code=400, detail="Could not find any service lines.")
         
-        main_date, currency = datetime.datetime.now(), 'EUR'
-        date_match = re.search(r'(\d{2}[./-]\d{2}[./-]\d{2,4})', text) or re.search(r'(\w+\s\d{1,2},\s\d{4})', text)
-        if date_match:
-            raw_date = date_match.group(1).replace('.','/').replace('-','/')
-            for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y"):
-                try: 
-                    main_date = datetime.datetime.strptime(raw_date, fmt)
-                    break
-                except: 
-                    continue
-        
+        currency = 'EUR'
         if '€' in text or 'EUR' in text.upper(): currency = 'EUR'
         elif '$' in text or 'USD' in text.upper(): currency = 'USD'
         
-        exchange_rate = fetch_exchange_rate(main_date, currency)
+        exchange_rate = fetch_exchange_rate(main_date_obj, currency)
         
         final_service_lines = []
         total_original = sum(item['line_total'] for item in service_items)
@@ -274,7 +283,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         df.to_excel(SUPPLIERS_PATH, index=False)
 
         context = {
-            "service_lines": final_service_lines, "InvoiceNumber": invoice_number, "Date": main_date.strftime("%d.%m.%Y"),
+            "service_lines": final_service_lines, "InvoiceNumber": invoice_number, "Date": main_date_str,
             "RecipientName": transliterate_to_bulgarian(customer_details['name']) or "N/A",
             "RecipientID": customer_details['vat'].replace("BG","") if customer_details['vat'] else "N/A",
             "RecipientVAT": customer_details['vat'] or "N/A",

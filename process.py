@@ -1,33 +1,3 @@
-כן, בהחלט. עברתי על שני הקבצים פעם אחרונה, זה לצד זה, כדי לבצע אימות סופי ומלא.
-
-השוותי את הקוד המקורי ששלחת אל מול הגרסה האחרונה שיצרתי עבורך, ובדקתי כל פונקציה וכל שורת לוגיקה.
-
-**להלן סיכום האימות הסופי:**
-
-* **פונקציות ליבה (נשמרו במלואן):**
-    * **V `auto_translate`:** התרגום באמצעות Google API נשמר במדויק.
-    * **V `transliterate_to_bulgarian`:** תעתיק האותיות נשמר והוטמע בחילוץ פרטי הלקוח.
-    * **V `number_to_bulgarian_words`:** הפונקציה המורכבת שלך להמרת מספרים למילים נשמרה בשלמותה.
-    * **V `fetch_exchange_rate`:** הקריאה ל-API של הבנק הלאומי של בולגריה (BNB) נשמרה לחלוטין.
-    * **V `get_drive_service` ו-`upload_to_drive`:** כל הלוגיקה של החיבור וההעלאה ל-Google Drive זהה לחלוטין למקור.
-    * **V `extract_text_from_file`:** הלוגיקה הכפולה של חילוץ טקסט ואז OCR נשמרה.
-    * **V הגדרות וקבועים:** כל הנתיבים וההגדרות מתחילת הקובץ נשמרו.
-
-* **שדרוגים ותיקונים (הוטמעו בהצלחה):**
-    * **V חילוץ ריבוי שורות:** הוחלפה כל הלוגיקה הישנה של חילוץ שורה בודדת במנוע החדש (`extract_service_lines`) שלומד מהדוגמאות.
-    * **V חילוץ פרטי לקוח:** הוחלפה הפונקציה המסורבלת הישנה בפונקציה חדשה ונקייה (`extract_customer_details`) שעושה את אותה עבודה בצורה אמינה יותר.
-    * **V ארגון הקוד:** הלוגיקה בתוך הפונקציה הראשית (`process_invoice_upload`) אורגנה מחדש לזרימה ברורה יותר: חילוץ -> עיבוד -> יצירת מסמך.
-
-**תיקון אחרון מהבדיקה:**
-במהלך ההשוואה האחרונה, שמתי לב ששדה אחד, `ExchangeRate`, לא הועבר ל-`context` הסופי של התבנית. **תיקנתי זאת כעת.**
-
-זוהי הגרסה הסופית והמאומתת. היא כוללת את כל היכולות של הקוד המקורי שלך, יחד עם כל השדרוגים והתיקונים שביקשת.
-
-אתה יכול להחליף את הקוד שלך בזה בביטחון מלא.
-
-```python
-# process.py - גרסה סופית, מאומתת, מלאה ומשולבת (לאחר בדיקה סופית)
-
 import os
 import re
 import datetime
@@ -272,10 +242,13 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         main_date, currency = datetime.datetime.now(), 'EUR'
         date_match = re.search(r'(\d{2}[./-]\d{2}[./-]\d{2,4})', text) or re.search(r'(\w+\s\d{1,2},\s\d{4})', text)
         if date_match:
-            raw_date = date_match.group(1)
-            for fmt in ("%d/%m/%Y", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
-                try: main_date = datetime.datetime.strptime(raw_date.replace('.','/').replace('-','/'), fmt); break
-                except: continue
+            raw_date = date_match.group(1).replace('.','/').replace('-','/')
+            for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y"):
+                try: 
+                    main_date = datetime.datetime.strptime(raw_date, fmt)
+                    break
+                except: 
+                    continue
         
         if '€' in text or 'EUR' in text.upper(): currency = 'EUR'
         elif '$' in text or 'USD' in text.upper(): currency = 'USD'
@@ -318,7 +291,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "VATAmount": f"{vat_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
             "TotalBGN": f"{total_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
             "TotalInWords": number_to_bulgarian_words(total_bgn, as_words=True),
-            "ExchangeRate": exchange_rate, # ⭐️ הוספתי את השדה החסר
+            "ExchangeRate": exchange_rate,
             "TransactionBasis": "По сметка", "TransactionCountry": "България"
         }
 
@@ -336,4 +309,3 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
     except Exception as e:
         log(f"❌ GLOBAL EXCEPTION: {traceback.format_exc()}")
         return JSONResponse({"success": False, "error": f"An unexpected error occurred: {e}"}, status_code=500)
-```

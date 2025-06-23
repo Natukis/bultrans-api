@@ -6,6 +6,7 @@ import pandas as pd
 import requests
 import pytesseract
 import traceback
+import time
 from pdf2image import convert_from_path
 from fastapi import UploadFile, APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -15,16 +16,21 @@ from xml.etree import ElementTree as ET
 from docx import Document
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, HttpRequest
 from tempfile import NamedTemporaryFile
 
-# --- Constants and Setup ---
-SUPPLIERS_PATH = "suppliers.xlsx"
-TEMPLATES_DIR = "templates"
+# --- Configuration from Environment Variables ---
+SUPPLIERS_PATH = os.getenv("SUPPLIERS_PATH", "suppliers.xlsx")
+TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "templates")
+DEFAULT_CURRENCY = os.getenv("DEFAULT_CURRENCY", "EUR")
+DEFAULT_VAT_PERCENT = float(os.getenv("DEFAULT_VAT_PERCENT", "20.0"))
+DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 UPLOAD_DIR = "/tmp/uploads"
-DRIVE_FOLDER_ID = "1JUTWRpBGKemiH6x89lHbV7b5J53fud3V"
+GOOGLE_API_TIMEOUT = int(os.getenv("GOOGLE_API_TIMEOUT", "20"))
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(TEMPLATES_DIR, exist_ok=True) 
+if not os.path.exists(TEMPLATES_DIR):
+    os.makedirs(TEMPLATES_DIR)
 
 router = APIRouter()
 
@@ -33,29 +39,35 @@ router = APIRouter()
 def log(msg):
     print(f"[{datetime.datetime.now()}] {msg}", flush=True)
 
+def is_cyrillic(text):
+    return bool(re.search('[\u0400-\u04FF]', text))
+
 def auto_translate(text, target_lang="bg"):
     if not text or not isinstance(text, str) or not text.strip(): return ""
     try:
-        if any('\u0400' <= char <= '\u04FF' for char in text): return text
+        if is_cyrillic(text): return text
         api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key: raise ValueError("Missing GOOGLE_API_KEY")
+        if not api_key: 
+            log("ERROR: Missing GOOGLE_API_KEY. Cannot translate.")
+            return None
         url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
         payload = {"q": text, "target": target_lang}
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=GOOGLE_API_TIMEOUT)
         if response.status_code == 200:
             return response.json()["data"]["translations"][0]["translatedText"]
-        raise HTTPException(status_code=response.status_code, detail=f"Translation API error: {response.text}")
+        log(f"Translation API error: {response.status_code} - {response.text}")
+        return None # Return None on API error
     except Exception as e:
         log(f"❌ Translation failed: {e}")
-        raise HTTPException(status_code=500, detail="Translation service failed")
+        return None
 
 def transliterate_to_bulgarian(text):
     if not text: return ""
     table = { "a": "а", "b": "б", "c": "ц", "d": "д", "e": "е", "f": "ф", "g": "г", "h": "х", "i": "и", "j": "дж", "k": "к", "l": "л", "m": "м", "n": "н", "o": "о", "p": "п", "q": "кю", "r": "р", "s": "с", "t": "т", "u": "у", "v": "в", "w": "у", "x": "кс", "y": "й", "z": "з", "A": "А", "B": "Б", "C": "Ц", "D": "Д", "E": "Е", "F": "Ф", "G": "Г", "H": "Х", "I": "И", "J": "Дж", "K": "К", "L": "Л", "M": "М", "N": "Н", "O": "О", "P": "П", "Q": "Кю", "R": "Р", "S": "С", "T": "Т", "U": "У", "V": "В", "W": "У", "X": "Кс", "Y": "Й", "Z": "З", ".": ".", " ": " ", ",": ",", "-": "-", "&": "и"}
     return "".join(table.get(char, char) for char in text)
 
-def number_to_bulgarian_words(amount, as_words=False):
-    # ⭐️ FIXED: Removed .capitalize() from leva_words to pass the test
+def number_to_bulgarian_words(amount, as_words=True):
+    # ⭐️ Full implementation restored.
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
@@ -85,7 +97,7 @@ def number_to_bulgarian_words(amount, as_words=False):
                         if ones > 0: parts.append(f"{tens_word} и {word_map[ones]}")
                         else: parts.append(tens_word)
                 return " ".join(parts)
-            leva_words = convert_to_words(leva) # Removed .capitalize()
+            leva_words = convert_to_words(leva).capitalize()
             return f"{leva_words} лева и {stotinki:02d} стотинки"
         else:
             leva_words = f"{leva} лв."
@@ -112,32 +124,51 @@ def fetch_exchange_rate(date_obj, currency_code):
         log(f"Exchange rate fetch failed: {e}")
         return None
 
+class TimeoutHttpRequest(HttpRequest):
+    def __init__(self, *args, **kwargs):
+        if 'timeout' not in kwargs:
+            kwargs['timeout'] = GOOGLE_API_TIMEOUT
+        super().__init__(*args, **kwargs)
+
 def get_drive_service():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     if not creds_json: raise ValueError("Missing GOOGLE_CREDS_JSON")
+    if not DRIVE_FOLDER_ID: raise ValueError("Missing DRIVE_FOLDER_ID")
     with NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as tf:
         tf.write(creds_json)
         path = tf.name
     try:
         creds = service_account.Credentials.from_service_account_file(path, scopes=["https://www.googleapis.com/auth/drive"])
-        return build("drive", "v3", credentials=creds)
+        return build("drive", "v3", credentials=creds, cache_discovery=False, requestBuilder=TimeoutHttpRequest)
     finally:
         os.remove(path)
 
 def upload_to_drive(local_path, filename):
+    # ⭐️ IMPROVEMENT: Added retry mechanism
     log(f"Uploading '{filename}' to Google Drive...")
-    try:
-        service = get_drive_service()
-        file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
-        media = MediaFileUpload(local_path, resumable=True)
-        file = service.files().create(body=file_metadata, media_body=media, fields="id, webViewLink").execute()
-        service.permissions().create(fileId=file["id"], body={"type": "anyone", "role": "reader"}).execute()
-        link = file.get("webViewLink")
-        log(f"Successfully uploaded. Link: {link}")
-        return link
-    except Exception as e:
-        log(f"❌ Google Drive upload failed: {e}")
-        return None
+    retries = 3
+    delay = 5
+    for i in range(retries):
+        try:
+            service = get_drive_service()
+            file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
+            media = MediaFileUpload(local_path, resumable=True)
+            file = service.files().create(body=file_metadata, media_body=media, fields="id, webViewLink").execute()
+            service.permissions().create(fileId=file["id"], body={"type": "anyone", "role": "reader"}).execute()
+            link = file.get("webViewLink")
+            log(f"Successfully uploaded. Link: {link}")
+            return link
+        except Exception as e:
+            log(f"❌ Google Drive upload attempt {i+1}/{retries} failed: {e}")
+            if i < retries - 1:
+                log(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                log("All upload retries failed.")
+                return None
+    return None
+
+# --- New, Improved & Refactored Functions ---
 
 def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
@@ -149,23 +180,15 @@ def extract_text_from_file(file_path, filename):
             return "\n".join(pytesseract.image_to_string(img, config='--psm 6') for img in convert_from_path(file_path, dpi=300))
         except Exception as e:
             log(f"PDF extraction failed: {e}"); return ""
-    elif filename.lower().endswith((".doc", ".docx")):
-        try:
-            return "\n".join([p.text for p in Document(file_path).paragraphs])
-        except Exception as e:
-            log(f"DOCX extraction failed: {e}"); return ""
     return ""
 
 def clean_number(num_str):
     if not isinstance(num_str, str): return 0.0
     num_str = re.sub(r'[^\d\.,-]', '', num_str)
     if ',' in num_str and '.' in num_str:
-        if num_str.rfind(',') > num_str.rfind('.'):
-            num_str = num_str.replace('.', '').replace(',', '.')
-        else:
-            num_str = num_str.replace(',', '')
-    elif ',' in num_str:
-        num_str = num_str.replace(',', '.')
+        if num_str.rfind(',') > num_str.rfind('.'): num_str = num_str.replace('.', '').replace(',', '.')
+        else: num_str = num_str.replace(',', '')
+    elif ',' in num_str: num_str = num_str.replace(',', '.')
     try: return float(num_str)
     except: return 0.0
 
@@ -185,41 +208,51 @@ def extract_invoice_date(text):
 def extract_customer_details(text, supplier_name=""):
     details = {'name': '', 'vat': '', 'id': '', 'address': '', 'city': '', 'country': 'България'}
     lines = text.splitlines()
+    customer_keywords = ['customer name:', 'bill to:', 'invoice to:', 'spett.le', 'client:']
     for line in lines:
         line_lower = line.lower()
-        if "customer name:" in line_lower and not details['name']:
-            raw_name = line.split(':', 1)[1].strip()
+        if not details['name'] and any(keyword in line_lower for keyword in customer_keywords):
+            raw_name = line.split(':', 1)[-1].strip()
             if supplier_name:
                 raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE)
             details['name'] = re.sub(r'(?i)\bsupplier\b', '', raw_name).strip()
-        elif "vat no:" in line_lower and not details['vat']:
+        elif not details['vat'] and "vat no:" in line_lower:
             vat_match = re.search(r'(BG\d+)', line, re.IGNORECASE)
             if vat_match: details['vat'] = vat_match.group(1)
-        elif "id no:" in line_lower and not details['id']:
+        elif not details['id'] and "id no:" in line_lower:
              id_match = re.search(r'\b(\d{9,})\b', line)
              if id_match: details['id'] = id_match.group(0)
-        elif "address:" in line_lower and not details['address']:
-            details['address'] = line.split(':', 1)[1].strip()
-        elif "city:" in line_lower and not details['city']:
-            city_name = line.split(':', 1)[1].strip()
+        elif not details['address'] and "address:" in line_lower:
+            details['address'] = line.split(':', 1)[-1].strip()
+        elif not details['city'] and "city:" in line_lower:
+            city_name = line.split(':', 1)[-1].strip()
             details['city'] = auto_translate(city_name)
-    log(f"Found customer details: {details}")
+    log(f"Extracted Customer Details: {details}")
     return details
 
 def extract_service_date(description):
     bg_months = {1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни", 7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"}
-    match = re.search(r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b', description, re.IGNORECASE)
-    if match:
-        month_name_en, year = match.group(1), match.group(2)
+    match1 = re.search(r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b', description, re.IGNORECASE)
+    if match1:
+        month_name_en, year = match1.group(1), match1.group(2)
         try:
             month_dt = datetime.datetime.strptime(month_name_en, "%B")
-            month_name_bg = bg_months[month_dt.month]
-            return f"м.{month_name_bg} {year}"
-        except ValueError: return ""
+            return f"м.{bg_months[month_dt.month]} {year}"
+        except ValueError: pass
+    match2 = re.search(r'\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b', description)
+    if match2:
+        try:
+            parts = re.split(r'[./-]', match2.group(1))
+            if len(parts) == 3:
+                month, year = int(parts[1]), int(parts[2])
+                if year < 100: year += 2000
+                return f"м.{bg_months[month]} {year}"
+        except: pass
     return ""
 
 def extract_service_lines(text):
-    service_items, lines = [], text.splitlines()
+    service_items = []
+    lines = text.splitlines()
     item_regex = re.compile(r"^(?P<desc>.+?)\s{2,}.*?(?P<total>[\d,]+\.\d{2})$")
     start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
     end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax']
@@ -239,41 +272,34 @@ def extract_service_lines(text):
                 if desc.lower() not in start_kw and len(desc) > 3:
                     service_items.append({'description': desc, 'line_total': clean_number(match.group('total')), 'ServiceDate': extract_service_date(desc)})
     if not service_items:
-        log("No structured lines found. Falling back to generic description.")
+        log("⚠️ No structured lines found. Activating fallback.")
         total = 0
-        for line in text.splitlines():
+        for line in reversed(text.splitlines()):
             if 'total' in line.lower() or 'amount due' in line.lower():
                 numbers = re.findall(r'[\d,]+\.\d{2}', line)
                 if numbers:
                     total = clean_number(numbers[-1])
-                    break
+                    if total > 0: break
         if total > 0:
             service_items.append({'description': "Consulting services per invoice", 'line_total': total, 'ServiceDate': ''})
-            log(f"✅ Created generic line from total: {total}")
+            log(f"✅ Created generic service line from total: {total}")
     return service_items
 
 def get_template_path_by_rows(num_rows: int) -> str:
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        base_path = os.path.join(script_dir, "templates")
-        max_supported = 5
-        effective_rows = min(num_rows, max_supported) if num_rows > 0 else 1
-        filename = f"BulTrans_Template_{effective_rows}row.docx"
-        full_path = os.path.join(base_path, filename)
-        log(f"Attempting to locate template at absolute path: {full_path}")
-        if not os.path.exists(full_path):
-            raise FileNotFoundError(f"Template file not found at calculated path: {full_path}")
-        return full_path
-    except Exception as e:
-        log(f"An error occurred in get_template_path_by_rows: {e}")
-        raise
+    max_supported = 5
+    effective_rows = min(num_rows, max_supported) if num_rows > 0 else 1
+    path = os.path.join(TEMPLATES_DIR, f"BulTrans_Template_{effective_rows}row.docx")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Template file not found: {path}")
+    return path
 
 # --- Main Endpoint ---
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
+    file_path = f"/tmp/{file.filename}"
+    output_path = ""
     try:
         log(f"--- Starting invoice processing for supplier: {supplier_id}, file: {file.filename} ---")
-        file_path = f"/tmp/{file.filename}"
         with open(file_path, "wb") as f: f.write(await file.read())
         text = extract_text_from_file(file_path, file.filename)
         if not text: raise HTTPException(status_code=400, detail="Could not extract text from file.")
@@ -284,27 +310,35 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         supplier_data = supplier_row.iloc[0]
 
         customer_details = extract_customer_details(text, supplier_data["SupplierName"])
-        service_items = extract_service_lines(text)
-        main_date_str, main_date_obj = extract_invoice_date(text)
+        log(f"Extracted Customer Details: {customer_details}")
         
+        main_date_str, main_date_obj = extract_invoice_date(text)
         if not main_date_obj:
             raise HTTPException(status_code=400, detail="לא נמצא תאריך הנפקה בחשבונית.")
-        if not service_items:
-            raise HTTPException(status_code=400, detail="לא נמצאו שורות שירות בחשבונית.")
+        log(f"Extracted Invoice Date: {main_date_str}")
         
-        currency = 'EUR'
+        service_items = [item for item in extract_service_lines(text) if item.get('line_total', 0) > 0]
+        if not service_items:
+            raise HTTPException(status_code=400, detail="לא נמצאו שורות שירות חוקיות בחשבונית.")
+        log(f"Extracted and validated {len(service_items)} service lines.")
+        
+        currency = DEFAULT_CURRENCY
         if '€' in text or 'EUR' in text.upper(): currency = 'EUR'
         elif '$' in text or 'USD' in text.upper(): currency = 'USD'
-        
+        else: log(f"⚠️ Could not detect EUR or USD. Defaulting to {DEFAULT_CURRENCY}.")
+        log(f"Detected currency: {currency}")
+
         exchange_rate = fetch_exchange_rate(main_date_obj, currency)
         if exchange_rate is None:
             raise HTTPException(status_code=400, detail=f"לא נמצא שער המרה למטבע {currency} בתאריך {main_date_str}")
+        log(f"Fetched exchange rate: {exchange_rate}")
 
         row_context = {}
         for idx, item in enumerate(service_items[:5], start=1):
             translated_desc = auto_translate(item["description"])
             if translated_desc is None:
-                raise HTTPException(status_code=500, detail=f"נכשל תרגום תיאור שירות: {item['description']}")
+                log(f"⚠️ Failed translating description: '{item['description']}'. Using original.")
+                translated_desc = item["description"]
             
             row_context[f"RN{idx}"] = idx
             row_context[f"ServiceDescription{idx}"] = translated_desc
@@ -315,7 +349,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             row_context[f"LineTotal{idx}"] = f"{round(item['line_total'] * exchange_rate, 2):.2f}"
 
         total_original = sum(item['line_total'] for item in service_items)
-        vat_percent = 20.0
+        vat_percent = DEFAULT_VAT_PERCENT
         base_bgn = round(total_original * exchange_rate, 2)
         vat_bgn = round(base_bgn * (vat_percent / 100), 2)
         total_bgn = base_bgn + vat_bgn
@@ -348,10 +382,10 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         }
         
         template_path = get_template_path_by_rows(len(service_items))
-        log(f"Selected template: {template_path}")
         tpl = DocxTemplate(template_path)
         
         merged_context = {**base_context, **row_context}
+        log(f"Rendering template '{template_path}' with final context.")
         
         tpl.render(merged_context)
         
@@ -369,3 +403,12 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
     except Exception as e:
         log(f"❌ GLOBAL EXCEPTION: {traceback.format_exc()}")
         return JSONResponse({"success": False, "error": f"An unexpected error occurred: {e}"}, status_code=500)
+    
+    finally:
+        # ⭐️ IMPROVEMENT: Clean up temporary files
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
+            log(f"Cleaned up input file: {file_path}")
+        if 'output_path' in locals() and os.path.exists(output_path):
+            os.remove(output_path)
+            log(f"Cleaned up output file: {output_path}")

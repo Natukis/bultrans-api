@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 import os
 
-# Import the new, core functions from the refactored process.py
+# Import the core functions from the refactored process.py
 from process import (
     auto_translate,
     number_to_bulgarian_words,

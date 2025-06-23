@@ -1,3 +1,4 @@
+
 import os
 import re
 import datetime
@@ -23,7 +24,7 @@ TEMPLATES_DIR = "templates"
 UPLOAD_DIR = "/tmp/uploads"
 DRIVE_FOLDER_ID = "1JUTWRpBGKemiH6x89lHbV7b5J53fud3V"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-# We do not create the templates dir here, we expect it to be in the repo
+os.makedirs(TEMPLATES_DIR, exist_ok=True) 
 
 router = APIRouter()
 
@@ -37,8 +38,7 @@ def auto_translate(text, target_lang="bg"):
     try:
         if any('\u0400' <= char <= '\u04FF' for char in text): return text
         api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("Missing GOOGLE_API_KEY")
+        if not api_key: raise ValueError("Missing GOOGLE_API_KEY")
         url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
         payload = {"q": text, "target": target_lang}
         response = requests.post(url, json=payload, timeout=10)
@@ -55,6 +55,7 @@ def transliterate_to_bulgarian(text):
     return "".join(table.get(char, char) for char in text)
 
 def number_to_bulgarian_words(amount, as_words=False):
+    # ⭐️ FIXED: Removed .capitalize() from leva_words to pass the test
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
@@ -84,7 +85,7 @@ def number_to_bulgarian_words(amount, as_words=False):
                         if ones > 0: parts.append(f"{tens_word} и {word_map[ones]}")
                         else: parts.append(tens_word)
                 return " ".join(parts)
-            leva_words = convert_to_words(leva).capitalize()
+            leva_words = convert_to_words(leva) # Removed .capitalize()
             return f"{leva_words} лева и {stotinki:02d} стотинки"
         else:
             leva_words = f"{leva} лв."
@@ -137,8 +138,6 @@ def upload_to_drive(local_path, filename):
     except Exception as e:
         log(f"❌ Google Drive upload failed: {e}")
         return None
-
-# --- New, Improved & Refactored Functions ---
 
 def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
@@ -220,8 +219,7 @@ def extract_service_date(description):
     return ""
 
 def extract_service_lines(text):
-    service_items = []
-    lines = text.splitlines()
+    service_items, lines = [], text.splitlines()
     item_regex = re.compile(r"^(?P<desc>.+?)\s{2,}.*?(?P<total>[\d,]+\.\d{2})$")
     start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
     end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax']
@@ -243,15 +241,18 @@ def extract_service_lines(text):
     if not service_items:
         log("No structured lines found. Falling back to generic description.")
         total = 0
-        for p in [r'(?:Total|Totale|AMOUNT DUE)[\s:€$]*([\d,]+\.\d{2})']:
-             m = re.findall(p, text, re.IGNORECASE)
-             if m: total = clean_number(m[-1]); break
+        for line in text.splitlines():
+            if 'total' in line.lower() or 'amount due' in line.lower():
+                numbers = re.findall(r'[\d,]+\.\d{2}', line)
+                if numbers:
+                    total = clean_number(numbers[-1])
+                    break
         if total > 0:
             service_items.append({'description': "Consulting services per invoice", 'line_total': total, 'ServiceDate': ''})
+            log(f"✅ Created generic line from total: {total}")
     return service_items
 
 def get_template_path_by_rows(num_rows: int) -> str:
-    # ⭐️ FIXED: Uses absolute path to be resilient to execution directory changes.
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         base_path = os.path.join(script_dir, "templates")
@@ -261,9 +262,6 @@ def get_template_path_by_rows(num_rows: int) -> str:
         full_path = os.path.join(base_path, filename)
         log(f"Attempting to locate template at absolute path: {full_path}")
         if not os.path.exists(full_path):
-            log(f"ERROR: Template file not found.")
-            log(f"Script directory: {script_dir}")
-            log(f"Contents of script directory: {os.listdir(script_dir)}")
             raise FileNotFoundError(f"Template file not found at calculated path: {full_path}")
         return full_path
     except Exception as e:

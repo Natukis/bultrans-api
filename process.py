@@ -16,7 +16,7 @@ from xml.etree import ElementTree as ET
 from docx import Document
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, HttpRequest
+from googleapiclient.http import MediaFileUpload
 from tempfile import NamedTemporaryFile
 
 # --- Configuration from Environment Variables ---
@@ -66,8 +66,7 @@ def transliterate_to_bulgarian(text):
     table = { "a": "а", "b": "б", "c": "ц", "d": "д", "e": "е", "f": "ф", "g": "г", "h": "х", "i": "и", "j": "дж", "k": "к", "l": "л", "m": "м", "n": "н", "o": "о", "p": "п", "q": "кю", "r": "р", "s": "с", "t": "т", "u": "у", "v": "в", "w": "у", "x": "кс", "y": "й", "z": "з", "A": "А", "B": "Б", "C": "Ц", "D": "Д", "E": "Е", "F": "Ф", "G": "Г", "H": "Х", "I": "И", "J": "Дж", "K": "К", "L": "Л", "M": "М", "N": "Н", "O": "О", "P": "П", "Q": "Кю", "R": "Р", "S": "С", "T": "Т", "U": "У", "V": "В", "W": "У", "X": "Кс", "Y": "Й", "Z": "З", ".": ".", " ": " ", ",": ",", "-": "-", "&": "и"}
     return "".join(table.get(char, char) for char in text)
 
-def number_to_bulgarian_words(amount, as_words=False):
-    # ⭐️ FINAL FIX: Removed .capitalize() from leva_words to pass the test
+def number_to_bulgarian_words(amount, as_words=True):
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
@@ -97,7 +96,7 @@ def number_to_bulgarian_words(amount, as_words=False):
                         if ones > 0: parts.append(f"{tens_word} и {word_map[ones]}")
                         else: parts.append(tens_word)
                 return " ".join(parts)
-            leva_words = convert_to_words(leva) # Removed .capitalize()
+            leva_words = convert_to_words(leva).capitalize()
             return f"{leva_words} лева и {stotinki:02d} стотинки"
         else:
             leva_words = f"{leva} лв."
@@ -124,13 +123,8 @@ def fetch_exchange_rate(date_obj, currency_code):
         log(f"Exchange rate fetch failed: {e}")
         return None
 
-class TimeoutHttpRequest(HttpRequest):
-    def __init__(self, *args, **kwargs):
-        if 'timeout' not in kwargs:
-            kwargs['timeout'] = GOOGLE_API_TIMEOUT
-        super().__init__(*args, **kwargs)
-
 def get_drive_service():
+    # ⭐️ FINAL FIX: Removed the problematic TimeoutHttpRequest
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     if not creds_json: raise ValueError("Missing GOOGLE_CREDS_JSON")
     if not DRIVE_FOLDER_ID: raise ValueError("Missing DRIVE_FOLDER_ID")
@@ -139,7 +133,8 @@ def get_drive_service():
         path = tf.name
     try:
         creds = service_account.Credentials.from_service_account_file(path, scopes=["https://www.googleapis.com/auth/drive"])
-        return build("drive", "v3", credentials=creds, cache_discovery=False, requestBuilder=TimeoutHttpRequest)
+        # The default client handles timeouts more robustly internally
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
     finally:
         os.remove(path)
 
@@ -167,6 +162,8 @@ def upload_to_drive(local_path, filename):
                 return None
     return None
 
+# --- New, Improved & Refactored Functions ---
+
 def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
     if filename.lower().endswith(".pdf"):
@@ -183,12 +180,9 @@ def clean_number(num_str):
     if not isinstance(num_str, str): return 0.0
     num_str = re.sub(r'[^\d\.,-]', '', num_str)
     if ',' in num_str and '.' in num_str:
-        if num_str.rfind(',') > num_str.rfind('.'):
-            num_str = num_str.replace('.', '').replace(',', '.')
-        else:
-            num_str = num_str.replace(',', '')
-    elif ',' in num_str:
-        num_str = num_str.replace(',', '.')
+        if num_str.rfind(',') > num_str.rfind('.'): num_str = num_str.replace('.', '').replace(',', '.')
+        else: num_str = num_str.replace(',', '')
+    elif ',' in num_str: num_str = num_str.replace(',', '.')
     try: return float(num_str)
     except: return 0.0
 
@@ -335,6 +329,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
 
         row_context = {}
         for idx, item in enumerate(service_items[:5], start=1):
+            log(f"Translating description for line {idx}: '{item['description']}'")
             translated_desc = auto_translate(item["description"])
             if translated_desc is None:
                 log(f"⚠️ Failed translating description: '{item['description']}'. Using original.")

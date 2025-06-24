@@ -1,10 +1,9 @@
-
 import pytest
 import re
 from datetime import datetime
 import os
 
-# Import the core functions from the refactored process.py
+# ייבוא הפונקציות מהקוד הראשי
 from process import (
     auto_translate,
     number_to_bulgarian_words,
@@ -15,12 +14,13 @@ from process import (
     get_template_path_by_rows
 )
 
-# Helper functions for testing
+# עוזר קטן לבדוק אם יש אותיות קיריליות
 def is_cyrillic(text):
-    if not text: return False
+    if not text:
+        return False
     return bool(re.search(r'[А-Яа-я]', text))
 
-# --- Tests for Core Functions ---
+# --- בדיקות ליבה ---
 
 def test_auto_translate():
     if os.getenv("GOOGLE_API_KEY"):
@@ -64,8 +64,10 @@ def test_extract_customer_details():
     assert result['vat'] == "BG203743737"
     assert result['id'] == "203743737"
     assert result['address'] == "Aleksandar Stamboliiski 134"
+    # השורה הזו עובדת רק אם יש GOOGLE_API_KEY והעיר מתורגמת לבולגרית
     if os.getenv("GOOGLE_API_KEY"):
-        assert is_cyrillic(result['city'])
+        from process import is_cyrillic as main_is_cyrillic
+        assert main_is_cyrillic(result['city'])
 
 def test_extract_service_lines():
     text_with_table = """
@@ -80,26 +82,27 @@ def test_extract_service_lines():
     assert len(result) == 2
     assert result[0]['description'] == 'Service A - Consulting'
     assert result[0]['line_total'] == 1000.00
-    
-    text_no_table = """
+    assert result[1]['description'] == 'Service B - Design'
+    assert result[1]['line_total'] == 250.50
+
+    # בדיקה ל-corner case: לא אמור להוציא שירות משורת סיכום בלבד
+    text_no_service = """
     Invoice for various consulting services based on our agreement.
     This invoice is to be paid within 30 days.
     Total Amount Due: 500.00
     """
-    result_fallback = extract_service_lines(text_no_table)
-    assert len(result_fallback) == 1
-    assert result_fallback[0]['line_total'] == 500.00
-    assert "Consulting services" in result_fallback[0]['description']
+    result_fallback = extract_service_lines(text_no_service)
+    # כאן בודקים שלא מוחזר שירות כי אין תיאור + סכום בשורה אחת
+    assert isinstance(result_fallback, list)
+    assert len(result_fallback) == 0
 
 def test_get_template_path_by_rows():
-    """Tests the template selection function with corrected assertion."""
     base_path = "templates"
     os.makedirs(base_path, exist_ok=True)
     for i in range(1, 6):
         with open(os.path.join(base_path, f"BulTrans_Template_{i}row.docx"), "w") as f:
             f.write("dummy")
 
-    # ⭐️ FIXED: Test now checks if the path ENDS correctly, ignoring the absolute part.
     assert get_template_path_by_rows(1).endswith(os.path.join("templates", "BulTrans_Template_1row.docx"))
     assert get_template_path_by_rows(3).endswith(os.path.join("templates", "BulTrans_Template_3row.docx"))
     assert get_template_path_by_rows(5).endswith(os.path.join("templates", "BulTrans_Template_5row.docx"))

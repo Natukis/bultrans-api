@@ -301,20 +301,22 @@ def extract_service_lines(text):
             })
         else:
             i += 1
-            # Fallback: Try to extract a single total if no service lines found
-            if not service_items:
-                for line in lines:
-                    m = re.search(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})', line)
-                    if m:
-                        amount = clean_number(m.group(1))
-                        if amount > 0:
-                            service_items.append({
-                                "description": "Total Amount Due",
-                                "line_total": amount,
-                                "ServiceDate": "м.НЯМА ДАТА"
-                            })
-                            break
-             return service_items
+
+    # Fallback: Try to extract a single total if no service lines found
+    if not service_items:
+        for line in lines:
+            m = re.search(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})', line)
+            if m:
+                amount = clean_number(m.group(1))
+                if amount > 0:
+                    service_items.append({
+                        "description": "Total Amount Due",
+                        "line_total": amount,
+                        "ServiceDate": "м.НЯМА ДАТА"
+                    })
+                    break
+    return service_items
+
 
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5

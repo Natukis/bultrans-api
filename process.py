@@ -16,7 +16,7 @@ from xml.etree import ElementTree as ET
 from docx import Document
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, HttpRequest
+from googleapiclient.http import MediaFileUpload
 from tempfile import NamedTemporaryFile
 
 # --- Configuration from Environment Variables ---
@@ -40,32 +40,50 @@ def log(msg):
     print(f"[{datetime.datetime.now()}] {msg}", flush=True)
 
 def is_cyrillic(text):
+    if not text: return False
     return bool(re.search('[\u0400-\u04FF]', text))
 
+def is_latin_only(text):
+    if not text: return True
+    return bool(re.match(r'^[a-zA-Z0-9\s.,&:\-()/\\\'"]+$', text))
+
+# TODO: Add unit tests for this function
 def auto_translate(text, target_lang="bg"):
     if not text or not isinstance(text, str) or not text.strip(): return ""
     try:
         if is_cyrillic(text): return text
         api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key: raise ValueError("Missing GOOGLE_API_KEY")
+        if not api_key: 
+            log("ERROR: Missing GOOGLE_API_KEY. Cannot translate.")
+            return None
         url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
         payload = {"q": text, "target": target_lang}
         response = requests.post(url, json=payload, timeout=GOOGLE_API_TIMEOUT)
         if response.status_code == 200:
-            return response.json()["data"]["translations"][0]["translatedText"]
+            return response.json()["data"]["translations"][0]["translatedText"].strip()
         log(f"Translation API error: {response.status_code} - {response.text}")
         return None
     except Exception as e:
         log(f"❌ Translation failed: {e}")
         return None
 
+# TODO: Add unit tests for this function
 def transliterate_to_bulgarian(text):
     if not text: return ""
-    table = { "a": "а", "b": "б", "c": "ц", "d": "д", "e": "е", "f": "ф", "g": "г", "h": "х", "i": "и", "j": "дж", "k": "к", "l": "л", "m": "м", "n": "н", "o": "о", "p": "п", "q": "кю", "r": "р", "s": "с", "t": "т", "u": "у", "v": "в", "w": "у", "x": "кс", "y": "й", "z": "з", "A": "А", "B": "Б", "C": "Ц", "D": "Д", "E": "Е", "F": "Ф", "G": "Г", "H": "Х", "I": "И", "J": "Дж", "K": "К", "L": "Л", "M": "М", "N": "Н", "O": "О", "P": "П", "Q": "Кю", "R": "Р", "S": "С", "T": "Т", "U": "У", "V": "В", "W": "У", "X": "Кс", "Y": "Й", "Z": "З", ".": ".", " ": " ", ",": ",", "-": "-", "&": "и"}
-    return "".join(table.get(char, char) for char in text)
+    text = text.strip()
+    trans_map = { 'a': 'а', 'b': 'б', 'c': 'ц', 'd': 'д', 'e': 'е', 'f': 'ф', 'g': 'г', 'h': 'х', 'i': 'и', 'j': 'дж', 'k': 'к', 'l': 'л', 'm': 'м', 'n': 'н', 'o': 'о', 'p': "п", 'q': "кю", 'r': "р", 's': "с", 't': "т", 'u': "у", 'v': "в", 'w': "у", 'x': "кс", 'y': "й", 'z': 'з' }
+    result = ""
+    for char in text:
+        lower_char = char.lower()
+        if lower_char in trans_map:
+            trans_char = trans_map[lower_char]
+            result += trans_char.upper() if char.isupper() else trans_char
+        else:
+            result += char
+    return result
 
-def number_to_bulgarian_words(amount, as_words=False):
-    # ⭐️ FINAL FIX: Removed .capitalize() from leva_words to pass the test
+def number_to_bulgarian_words(amount, as_words=True):
+    # ⭐️ Full implementation restored
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
@@ -95,7 +113,7 @@ def number_to_bulgarian_words(amount, as_words=False):
                         if ones > 0: parts.append(f"{tens_word} и {word_map[ones]}")
                         else: parts.append(tens_word)
                 return " ".join(parts)
-            leva_words = convert_to_words(leva) # The .capitalize() was removed here.
+            leva_words = convert_to_words(leva).capitalize()
             return f"{leva_words} лева и {stotinki:02d} стотинки"
         else:
             leva_words = f"{leva} лв."
@@ -123,6 +141,7 @@ def fetch_exchange_rate(date_obj, currency_code):
         return None
 
 def get_drive_service():
+    # ⭐️ Full implementation restored
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     if not creds_json: raise ValueError("Missing GOOGLE_CREDS_JSON")
     if not DRIVE_FOLDER_ID: raise ValueError("Missing DRIVE_FOLDER_ID")
@@ -136,6 +155,7 @@ def get_drive_service():
         os.remove(path)
 
 def upload_to_drive(local_path, filename):
+    # ⭐️ Full implementation restored
     log(f"Uploading '{filename}' to Google Drive...")
     retries = 3
     delay = 5
@@ -158,6 +178,8 @@ def upload_to_drive(local_path, filename):
                 log("All upload retries failed.")
                 return None
     return None
+
+# --- New, Improved & Refactored Functions ---
 
 def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
@@ -184,12 +206,13 @@ def clean_number(num_str):
     try: return float(num_str)
     except: return 0.0
 
+# TODO: Add unit tests for this function
 def extract_invoice_date(text):
     patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
-            raw_date = match.group(1)
+            raw_date = match.group(1).strip()
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
                 try:
                     dt = datetime.datetime.strptime(raw_date, fmt)
@@ -198,39 +221,40 @@ def extract_invoice_date(text):
     return None, None
 
 def extract_customer_details(text, supplier_name=""):
-    details = {'name': '', 'vat': '', 'id': '', 'address': '', 'city': '', 'country': 'България'}
+    details = {'name': '', 'vat': '', 'id': '', 'address': '', 'city': ''}
     lines = text.splitlines()
+    id_keywords = ["id no", "uic", "company no", "tax id"]
     for line in lines:
         line_lower = line.lower()
-        if not details['name'] and ("customer name:" in line_lower or "bill to:" in line_lower or "invoice to:" in line_lower):
+        if not details['name'] and any(keyword in line_lower for keyword in ['customer name:', 'bill to:', 'invoice to:']):
             raw_name = line.split(':', 1)[-1].strip()
             if supplier_name:
                 raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE)
-            details['name'] = re.sub(r'(?i)\bsupplier\b', '', raw_name).strip()
-        elif not details['vat'] and "vat no:" in line_lower:
+            details['name'] = re.sub(r'(?i)\bsupplier\b|:', '', raw_name).strip()
+        elif not details['vat'] and "vat" in line_lower:
             vat_match = re.search(r'(BG\d+)', line, re.IGNORECASE)
-            if vat_match: details['vat'] = vat_match.group(1)
-        elif not details['id'] and "id no:" in line_lower:
-             id_match = re.search(r'\b(\d{9,})\b', line)
-             if id_match: details['id'] = id_match.group(0)
+            if vat_match: details['vat'] = vat_match.group(1).strip()
+        elif not details['id'] and any(keyword in line_lower for keyword in id_keywords):
+             id_match = re.search(r'\b(\d{7,15})\b', line)
+             if id_match: details['id'] = id_match.group(0).strip()
         elif not details['address'] and "address:" in line_lower:
             details['address'] = line.split(':', 1)[-1].strip()
         elif not details['city'] and "city:" in line_lower:
-            city_name = line.split(':', 1)[-1].strip()
-            details['city'] = auto_translate(city_name)
-    log(f"Extracted Customer Details: {details}")
+            details['city'] = line.split(':', 1)[-1].strip()
     return details
 
-def extract_service_date(description):
+def extract_service_date(text_block):
     bg_months = {1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни", 7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"}
-    match1 = re.search(r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b', description, re.IGNORECASE)
+    # Pattern 1: Month Name and Year
+    match1 = re.search(r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b', text_block, re.IGNORECASE)
     if match1:
         month_name_en, year = match1.group(1), match1.group(2)
         try:
             month_dt = datetime.datetime.strptime(month_name_en, "%B")
             return f"м.{bg_months[month_dt.month]} {year}"
         except ValueError: pass
-    match2 = re.search(r'\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b', description)
+    # Pattern 2: Numeric date
+    match2 = re.search(r'\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b', text_block)
     if match2:
         try:
             parts = re.split(r'[./-]', match2.group(1))
@@ -239,41 +263,49 @@ def extract_service_date(description):
                 if year < 100: year += 2000
                 return f"м.{bg_months[month]} {year}"
         except: pass
-    return ""
+    return "м.НЯМА ДАТА"
 
 def extract_service_lines(text):
     service_items = []
-    lines = text.splitlines()
-    item_regex = re.compile(r"^(?P<desc>.+?)\s{2,}.*?(?P<total>[\d,]+\.\d{2})$")
-    start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
-    end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax']
-    in_table = False
-    for line in lines:
-        line_lower = line.lower().strip()
-        if any(k in line_lower for k in end_kw):
-            in_table = False
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat']
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if any(k in line.lower() for k in end_kw):
+            break
+        
+        is_potential_service = len(line) > 3 and not line.lower().startswith(tuple(end_kw)) and not line.lower().startswith(tuple(start_kw))
+        start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
+        if any(k in line.lower() for k in start_kw):
+            i += 1
             continue
-        if any(k in line_lower for k in start_kw) and len(line_lower) < 50:
-            in_table = True
-            continue
-        if in_table:
-            match = item_regex.match(line.strip())
-            if match:
-                desc = match.group('desc').strip()
-                if desc.lower() not in start_kw and len(desc) > 3:
-                    service_items.append({'description': desc, 'line_total': clean_number(match.group('total')), 'ServiceDate': extract_service_date(desc)})
-    if not service_items:
-        log("⚠️ No structured lines found. Activating fallback.")
-        total = 0
-        for line in reversed(text.splitlines()):
-            if 'total' in line.lower() or 'amount due' in line.lower():
-                numbers = re.findall(r'[\d,]+\.\d{2}', line)
-                if numbers:
-                    total = clean_number(numbers[-1])
-                    if total > 0: break
-        if total > 0:
-            service_items.append({'description': "Consulting services per invoice", 'line_total': total, 'ServiceDate': ''})
-            log(f"✅ Created generic service line from total: {total}")
+
+        if is_potential_service:
+            line_text_for_date = line
+            amount_match = re.search(r'([\d,]+\.\d{2})$', line)
+            current_line_desc = line
+            
+            if amount_match:
+                line_total = clean_number(amount_match.group(1))
+                current_line_desc = re.sub(r'\s{2,}.*$', '', line.replace(amount_match.group(1), '')).strip()
+                i += 1
+            elif i + 1 < len(lines) and re.fullmatch(r'[\d,]+\.\d{2}', lines[i+1].strip()):
+                line_total = clean_number(lines[i+1])
+                line_text_for_date += f" {lines[i+1]}"
+                i += 2
+            else:
+                i += 1
+                continue
+
+            service_items.append({
+                'description': current_line_desc,
+                'line_total': line_total,
+                'ServiceDate': extract_service_date(line_text_for_date)
+            })
+        else:
+            i += 1
+            
     return service_items
 
 def get_template_path_by_rows(num_rows: int) -> str:
@@ -287,6 +319,7 @@ def get_template_path_by_rows(num_rows: int) -> str:
 # --- Main Endpoint ---
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
+    processing_errors = []
     file_path = f"/tmp/{file.filename}"
     output_path = ""
     try:
@@ -297,48 +330,99 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
 
         df = pd.read_excel(SUPPLIERS_PATH)
         supplier_row = df[df["SupplierCompanyID"] == int(supplier_id)]
-        if supplier_row.empty: raise HTTPException(status_code=404, detail="Supplier not found")
+        if supplier_row.empty: raise HTTPException(status_code=404, detail="Supplier not found in suppliers.xlsx")
         supplier_data = supplier_row.iloc[0]
-
-        customer_details = extract_customer_details(text, supplier_data["SupplierName"])
-        log(f"Extracted Customer Details: {customer_details}")
+        
+        required_supplier_fields = ["SupplierName", "SupplierCompanyVAT", "IBAN", "Bankname"]
+        for field in required_supplier_fields:
+            if pd.isna(supplier_data.get(field)) or not str(supplier_data.get(field)).strip():
+                 raise HTTPException(status_code=400, detail=f"Critical: Supplier field '{field}' is missing in Excel for the given ID.")
+        log(f"Loaded Supplier Data for: {supplier_data['SupplierName']}")
         
         main_date_str, main_date_obj = extract_invoice_date(text)
         if not main_date_obj:
-            raise HTTPException(status_code=400, detail="לא נמצא תאריך הנפקה בחשבונית.")
+            processing_errors.append("Warning: Invoice date not found. Used current date as fallback.")
+            main_date_obj = datetime.datetime.now()
+            main_date_str = main_date_obj.strftime("%d.%m.%Y")
         log(f"Extracted Invoice Date: {main_date_str}")
         
         service_items = [item for item in extract_service_lines(text) if item.get('line_total', 0) > 0]
         if not service_items:
-            raise HTTPException(status_code=400, detail="לא נמצאו שורות שירות חוקיות בחשבונית.")
+            raise HTTPException(status_code=400, detail="Critical: No valid service lines found in the invoice.")
+        if len(service_items) > 5:
+            processing_errors.append(f"Warning: Only the first 5 service lines were included, the rest were omitted.")
         log(f"Extracted and validated {len(service_items)} service lines.")
+
+        customer_details = extract_customer_details(text, supplier_data["SupplierName"])
+        log(f"Extracted Customer Details: {customer_details}")
         
+        currency_map_symbols = {"€": "EUR", "$": "USD", "£": "GBP"}
+        currency_map_words = {"usd": "USD", "euro": "EUR", "bgn": "BGN", "gbp": "GBP"}
         currency = DEFAULT_CURRENCY
-        if '€' in text or 'EUR' in text.upper(): currency = 'EUR'
-        elif '$' in text or 'USD' in text.upper(): currency = 'USD'
-        else: log(f"⚠️ Could not detect EUR or USD. Defaulting to {DEFAULT_CURRENCY}.")
+        detected = False
+        text_lower = text.lower()
+        for symbol, code in currency_map_symbols.items():
+            if symbol in text: currency, detected = code, True; break
+        if not detected:
+            for word, code in currency_map_words.items():
+                if word in text_lower: currency, detected = code, True; break
+        if not detected:
+            currency_match = re.search(r'\b([A-Z]{3})\b', text)
+            if currency_match: currency = currency_match.group(1)
+        if not detected and not currency_match:
+            log(f"⚠️ Could not detect a specific currency. Defaulting to {DEFAULT_CURRENCY}.")
         log(f"Detected currency: {currency}")
 
         exchange_rate = fetch_exchange_rate(main_date_obj, currency)
         if exchange_rate is None:
-            raise HTTPException(status_code=400, detail=f"לא נמצא שער המרה למטבע {currency} בתאריך {main_date_str}")
+            processing_errors.append(f"Warning: No exchange rate found for currency {currency} on {main_date_str}. Calculations done using 1.0.")
+            exchange_rate = 1.0
         log(f"Fetched exchange rate: {exchange_rate}")
 
         row_context = {}
         for idx, item in enumerate(service_items[:5], start=1):
-            log(f"Translating description for line {idx}: '{item['description']}'")
             translated_desc = auto_translate(item["description"])
             if translated_desc is None:
-                log(f"⚠️ Failed translating description: '{item['description']}'. Using original.")
+                processing_errors.append(f"Warning: Translation failed for service line {idx}. Using original description.")
                 translated_desc = item["description"]
             
+            service_date_str = item.get("ServiceDate", "м.НЯМА ДАТА")
+            if service_date_str == "м.НЯМА ДАТА":
+                processing_errors.append(f"Warning: No date found in service description for line {idx}.")
+            
+            final_description = f"{translated_desc.strip()} {service_date_str}" if service_date_str != "м.НЯМА ДАТА" else translated_desc.strip()
+            
             row_context[f"RN{idx}"] = idx
-            row_context[f"ServiceDescription{idx}"] = translated_desc
-            row_context[f"ServiceDate{idx}"] = item.get("ServiceDate", "")
+            row_context[f"ServiceDescription{idx}"] = final_description
             row_context[f"Cur{idx}"] = currency
             row_context[f"Amount{idx}"] = f"{item['line_total']:.2f}"
             row_context[f"UnitPrice{idx}"] = f"{exchange_rate:.5f}"
             row_context[f"LineTotal{idx}"] = f"{round(item['line_total'] * exchange_rate, 2):.2f}"
+
+        recipient_name_raw = customer_details.get('name', '').strip()
+        if not recipient_name_raw:
+             processing_errors.append("Warning: Customer name not detected – check invoice OCR.")
+             recipient_name_final = "N/A"
+        elif not is_latin_only(recipient_name_raw):
+            processing_errors.append("Warning: Customer name not in Latin characters – translation attempted.")
+            recipient_name_final = auto_translate(recipient_name_raw) or recipient_name_raw
+        else:
+            recipient_name_final = transliterate_to_bulgarian(recipient_name_raw)
+
+        recipient_address_raw = customer_details.get('address', '').strip()
+        recipient_address_final = auto_translate(recipient_address_raw)
+        if not recipient_address_final:
+            processing_errors.append("Warning: Failed to translate customer address, using transliteration as fallback.")
+            recipient_address_final = transliterate_to_bulgarian(recipient_address_raw) or "N/A"
+
+        recipient_city_raw = customer_details.get('city', '').strip()
+        recipient_city_final = auto_translate(recipient_city_raw)
+        if not recipient_city_final:
+            processing_errors.append("Warning: Failed to translate customer city, using transliteration as fallback.")
+            recipient_city_final = transliterate_to_bulgarian(recipient_city_raw) or "N/A"
+
+        if not customer_details.get('vat') and not customer_details.get('id'):
+            processing_errors.append("Warning: Customer VAT or ID could not be extracted.")
 
         total_original = sum(item['line_total'] for item in service_items)
         vat_percent = DEFAULT_VAT_PERCENT
@@ -352,18 +436,19 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
 
         base_context = {
             "InvoiceNumber": invoice_number, "Date": main_date_str,
-            "RecipientName": transliterate_to_bulgarian(customer_details['name']) or "N/A",
-            "RecipientID": customer_details.get('id') or (customer_details['vat'].replace("BG","") if customer_details['vat'] else "N/A"),
-            "RecipientVAT": customer_details['vat'] or "N/A",
-            "RecipientAddress": transliterate_to_bulgarian(customer_details['address']) or "N/A",
-            "RecipientCity": customer_details['city'] or "N/A", "RecipientCountry": customer_details['country'],
-            "SupplierName": auto_translate(str(supplier_data["SupplierName"])),
-            "SupplierCompanyID": str(supplier_data["SupplierCompanyID"]),
-            "SupplierCompanyVAT": str(supplier_data["SupplierCompanyVAT"]),
-            "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])),
-            "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])),
-            "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]),
-            "IBAN": str(supplier_data["IBAN"]), "BankName": auto_translate(str(supplier_data["Bankname"])), "BankCode": str(supplier_data["BankCode"]),
+            "RecipientName": recipient_name_final,
+            "RecipientID": (customer_details.get('id') or (customer_details.get('vat', '').replace("BG",""))).strip(),
+            "RecipientVAT": customer_details.get('vat', "N/A"),
+            "RecipientAddress": recipient_address_final,
+            "RecipientCity": recipient_city_final,
+            "RecipientCountry": "България",
+            "SupplierName": auto_translate(str(supplier_data["SupplierName"])).strip(),
+            "SupplierCompanyID": str(supplier_data["SupplierCompanyID"]).strip(),
+            "SupplierCompanyVAT": str(supplier_data["SupplierCompanyVAT"]).strip(),
+            "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])).strip(),
+            "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])).strip(),
+            "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]).strip(),
+            "IBAN": str(supplier_data["IBAN"]).strip(), "BankName": auto_translate(str(supplier_data["Bankname"])).strip(), "BankCode": str(supplier_data["BankCode"]).strip(),
             "AmountBGN": f"{base_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
             "VATAmount": f"{vat_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
             "vat_percent": vat_percent,
@@ -377,7 +462,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         tpl = DocxTemplate(template_path)
         
         merged_context = {**base_context, **row_context}
-        log(f"Rendering template '{template_path}' with final context.")
+        log(f"Final merged context: {merged_context}")
         
         tpl.render(merged_context)
         
@@ -388,13 +473,17 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         
         drive_link = upload_to_drive(output_path, output_filename)
         
-        return JSONResponse({"success": True, "data": {"invoice_number": invoice_number, "drive_link": drive_link}})
+        return JSONResponse({
+            "success": True,
+            "data": {"invoice_number": invoice_number, "drive_link": drive_link},
+            "errors": processing_errors
+        })
 
     except HTTPException as he:
         raise he
     except Exception as e:
         log(f"❌ GLOBAL EXCEPTION: {traceback.format_exc()}")
-        return JSONResponse({"success": False, "error": f"An unexpected error occurred: {e}"}, status_code=500)
+        return JSONResponse({"success": False, "data": None, "errors": [f"An unexpected server error occurred: {e}"]}, status_code=500)
     
     finally:
         if 'file_path' in locals() and os.path.exists(file_path):

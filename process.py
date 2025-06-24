@@ -274,9 +274,6 @@ def extract_service_date(text_block):
     return "м.НЯМА ДАТА"
 
 def extract_service_lines(text):
-    """
-    זיהוי שורות שירות אמיתיות מחשבונית (טבלאות או תיאור חופשי), ומניעת שורות סכום בלבד.
-    """
     service_items = []
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat', 'amount due']
@@ -284,7 +281,6 @@ def extract_service_lines(text):
     in_table = False
     i = 0
 
-    # --- 1. זיהוי לפי טבלה קלאסית (אם קיימת) ---
     while i < len(lines):
         line = lines[i]
         line_lower = line.lower()
@@ -310,11 +306,10 @@ def extract_service_lines(text):
                         'line_total': line_total,
                         'ServiceDate': extract_service_date(line)
                     })
-            i += 1
-        else:
-            i += 1
+            # ממשיכים תמיד – אין break
+        i += 1
 
-    # --- 2. fallback: אם לא נמצאה אף שורת שירות אמיתית, חפש כמו בקוד הישן ---
+    # fallback – כמו קודם – רק אם לא מצאנו אף שורת שירות בטבלה
     if not service_items:
         for idx, line in enumerate(lines):
             if re.search(r"(?i)(service|услуга|agreement|based|description)", line) and re.search(r'([\d,]+\.\d{2})', line):
@@ -328,9 +323,9 @@ def extract_service_lines(text):
                             'line_total': line_total,
                             'ServiceDate': extract_service_date(line)
                         })
-                        break  # fallback: רק אחד
+                        break
 
-        # גם fallback קלאסי: שורה שמתחילה במספר + תיאור
+        # fallback נוסף: שורה שמתחילה במספר + תיאור
         if not service_items:
             for idx, line in enumerate(lines):
                 m = re.match(r"^\d+\s+(.+)", line)
@@ -355,8 +350,6 @@ def extract_service_lines(text):
 
     return service_items
 
-
-    return service_items
 
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5

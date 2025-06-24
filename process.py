@@ -1,4 +1,3 @@
-
 import os
 import re
 import datetime
@@ -47,7 +46,6 @@ def is_latin_only(text):
     if not text: return True
     return bool(re.match(r'^[a-zA-Z0-9\s.,&:\-()/\\\'"]+$', text))
 
-# TODO: Add unit tests for this function
 def auto_translate(text, target_lang="bg"):
     if not text or not isinstance(text, str) or not text.strip(): return ""
     try:
@@ -67,7 +65,6 @@ def auto_translate(text, target_lang="bg"):
         log(f"❌ Translation failed: {e}")
         return None
 
-# TODO: Add unit tests for this function
 def transliterate_to_bulgarian(text):
     if not text: return ""
     text = text.strip()
@@ -83,7 +80,6 @@ def transliterate_to_bulgarian(text):
     return result
 
 def number_to_bulgarian_words(amount, as_words=True):
-    # ⭐️ Full implementation restored
     try:
         leva = int(amount)
         stotinki = int(round((amount - leva) * 100))
@@ -141,7 +137,6 @@ def fetch_exchange_rate(date_obj, currency_code):
         return None
 
 def get_drive_service():
-    # ⭐️ Full implementation restored
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     if not creds_json: raise ValueError("Missing GOOGLE_CREDS_JSON")
     if not DRIVE_FOLDER_ID: raise ValueError("Missing DRIVE_FOLDER_ID")
@@ -155,7 +150,6 @@ def get_drive_service():
         os.remove(path)
 
 def upload_to_drive(local_path, filename):
-    # ⭐️ Full implementation restored
     log(f"Uploading '{filename}' to Google Drive...")
     retries = 3
     delay = 5
@@ -206,7 +200,6 @@ def clean_number(num_str):
     try: return float(num_str)
     except: return 0.0
 
-# TODO: Add unit tests for this function
 def extract_invoice_date(text):
     patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
     for pattern in patterns:
@@ -245,7 +238,6 @@ def extract_customer_details(text, supplier_name=""):
 
 def extract_service_date(text_block):
     bg_months = {1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни", 7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"}
-    # Pattern 1: Month Name and Year
     match1 = re.search(r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b', text_block, re.IGNORECASE)
     if match1:
         month_name_en, year = match1.group(1), match1.group(2)
@@ -253,7 +245,6 @@ def extract_service_date(text_block):
             month_dt = datetime.datetime.strptime(month_name_en, "%B")
             return f"м.{bg_months[month_dt.month]} {year}"
         except ValueError: pass
-    # Pattern 2: Numeric date
     match2 = re.search(r'\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b', text_block)
     if match2:
         try:
@@ -275,12 +266,12 @@ def extract_service_lines(text):
         if any(k in line.lower() for k in end_kw):
             break
         
-        is_potential_service = len(line) > 3 and not line.lower().startswith(tuple(end_kw)) and not line.lower().startswith(tuple(start_kw))
         start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
         if any(k in line.lower() for k in start_kw):
             i += 1
             continue
 
+        is_potential_service = len(line) > 3
         if is_potential_service:
             line_text_for_date = line
             amount_match = re.search(r'([\d,]+\.\d{2})$', line)
@@ -305,7 +296,6 @@ def extract_service_lines(text):
             })
         else:
             i += 1
-            
     return service_items
 
 def get_template_path_by_rows(num_rows: int) -> str:
@@ -316,7 +306,6 @@ def get_template_path_by_rows(num_rows: int) -> str:
         raise FileNotFoundError(f"Template file not found: {path}")
     return path
 
-# --- Main Endpoint ---
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     processing_errors = []
@@ -399,6 +388,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             row_context[f"UnitPrice{idx}"] = f"{exchange_rate:.5f}"
             row_context[f"LineTotal{idx}"] = f"{round(item['line_total'] * exchange_rate, 2):.2f}"
 
+        # Handle Customer Name
         recipient_name_raw = customer_details.get('name', '').strip()
         if not recipient_name_raw:
              processing_errors.append("Warning: Customer name not detected – check invoice OCR.")
@@ -409,17 +399,20 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         else:
             recipient_name_final = transliterate_to_bulgarian(recipient_name_raw)
 
+        # ⭐️ IMPROVEMENT: Translate address/city first, then fallback to transliterate
         recipient_address_raw = customer_details.get('address', '').strip()
         recipient_address_final = auto_translate(recipient_address_raw)
         if not recipient_address_final:
             processing_errors.append("Warning: Failed to translate customer address, using transliteration as fallback.")
             recipient_address_final = transliterate_to_bulgarian(recipient_address_raw) or "N/A"
+        if recipient_address_final == "N/A": processing_errors.append("Warning: Customer address could not be extracted.")
 
         recipient_city_raw = customer_details.get('city', '').strip()
         recipient_city_final = auto_translate(recipient_city_raw)
         if not recipient_city_final:
             processing_errors.append("Warning: Failed to translate customer city, using transliteration as fallback.")
             recipient_city_final = transliterate_to_bulgarian(recipient_city_raw) or "N/A"
+        if recipient_city_final == "N/A": processing_errors.append("Warning: Customer city could not be extracted.")
 
         if not customer_details.get('vat') and not customer_details.get('id'):
             processing_errors.append("Warning: Customer VAT or ID could not be extracted.")

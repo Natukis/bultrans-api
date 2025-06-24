@@ -309,12 +309,14 @@ def extract_service_lines(text):
             if m:
                 amount = clean_number(m.group(1))
                 if amount > 0:
-                    # Use the text before the amount as description, or previous line if empty
-                    desc = line[:m.start()].strip()
-                    if not desc and idx > 0:
+                    # השתמש בשורה שמעל (אם יש) בתור תיאור
+                    desc = ""
+                    if idx > 0:
                         prev_line = lines[idx - 1].strip()
-                        if prev_line:
+                        if prev_line and not re.search(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', prev_line):
                             desc = prev_line
+                    if not desc:
+                        desc = line[:m.start()].strip()
                     if not desc:
                         desc = "Total Amount Due"
                     service_items.append({
@@ -325,6 +327,7 @@ def extract_service_lines(text):
                     break
 
     return service_items
+
 
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5

@@ -220,26 +220,38 @@ def extract_customer_details(text, supplier_name=""):
     id_keywords = ["id no", "uic", "company no", "tax id"]
     for line in lines:
         line_lower = line.lower()
+        # שם הלקוח
         if not details['name'] and any(keyword in line_lower for keyword in ['customer name:', 'bill to:', 'invoice to:']):
             raw_name = line.split(':', 1)[-1].strip()
             if supplier_name:
                 raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE)
             details['name'] = re.sub(r'(?i)\bsupplier\b|:', '', raw_name).strip()
-        elif not details['vat'] and "vat" in line_lower:
+        # VAT
+        if not details['vat'] and "vat" in line_lower:
             vat_match = re.search(r'(BG\d+)', line, re.IGNORECASE)
-            if vat_match: details['vat'] = vat_match.group(1).strip()
-        elif not details['id'] and any(keyword in line_lower for keyword in id_keywords):
-             id_match = re.search(r'\b(\d{7,15})\b', line)
-             if id_match: details['id'] = id_match.group(0).strip()
-        elif not details['address'] and "address:" in line_lower:
+            if vat_match:
+                details['vat'] = vat_match.group(1).strip()
+        # מספר חברה/ח.פ
+        if not details['id'] and any(keyword in line_lower for keyword in id_keywords):
+            id_match = re.search(r'\b(\d{7,15})\b', line)
+            if id_match:
+                details['id'] = id_match.group(0).strip()
+        # כתובת
+        if not details['address'] and "address:" in line_lower:
             details['address'] = line.split(':', 1)[-1].strip()
-        elif not details['city'] and "city:" in line_lower:
+        # עיר
+        if not details['city'] and "city:" in line_lower:
             city_raw = line.split(':', 1)[-1].strip()
+            # אם יש API תתרגם, אחרת תשאיר
             if os.getenv("GOOGLE_API_KEY"):
-                details['city'] = auto_translate(city_raw, target_lang="bg") or city_raw
+                try:
+                    city_trans = auto_translate(city_raw, target_lang="bg")
+                    details['city'] = city_trans if city_trans else city_raw
+                except Exception:
+                    details['city'] = city_raw
             else:
                 details['city'] = city_raw
-            return details
+    return details
 
 def extract_service_date(text_block):
     bg_months = {1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни", 7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"}

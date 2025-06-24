@@ -111,7 +111,7 @@ def number_to_bulgarian_words(amount, as_words=True):
                         if ones > 0: parts.append(f"{tens_word} и {word_map[ones]}")
                         else: parts.append(tens_word)
                 return " ".join(parts)
-            leva_words = convert_to_words(leva).capitalize()
+            leva_words = convert_to_words(leva)
             return f"{leva_words} лева и {stotinki:02d} стотинки"
         else:
             leva_words = f"{leva} лв."

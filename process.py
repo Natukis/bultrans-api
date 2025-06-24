@@ -279,15 +279,16 @@ def extract_service_lines(text):
     end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat', 'amount due']
     start_kw = ['description', 'descrizione', 'item', 'activity', 'amount', 'service']
     in_table = False
-    i = 0
 
-    while i < len(lines):
-        line = lines[i]
+    for i, line in enumerate(lines):
         line_lower = line.lower()
-
+        # start table
         if any(k in line_lower for k in start_kw):
             in_table = True
-            i += 1
+            continue
+        # end table
+        if any(k in line_lower for k in end_kw):
+            in_table = False
             continue
 
         if in_table:
@@ -302,10 +303,6 @@ def extract_service_lines(text):
                         'line_total': line_total,
                         'ServiceDate': extract_service_date(line)
                     })
-            # עכשיו אחרי שמצאנו/לא מצאנו שירות, נבדוק אם זו שורת סיום טבלה:
-            if any(k in line_lower for k in end_kw):
-                in_table = False
-        i += 1
 
     # fallback – כמו קודם – רק אם לא מצאנו אף שורת שירות בטבלה
     if not service_items:
@@ -347,6 +344,7 @@ def extract_service_lines(text):
                         break
 
     return service_items
+
 
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5

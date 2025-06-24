@@ -289,7 +289,6 @@ def extract_service_lines(text):
         line = lines[i]
         line_lower = line.lower()
 
-        # Start/end of table
         if any(k in line_lower for k in start_kw):
             in_table = True
             i += 1
@@ -304,7 +303,6 @@ def extract_service_lines(text):
             if amount_match:
                 desc = line.replace(amount_match.group(1), '').strip()
                 line_total = clean_number(amount_match.group(1))
-
                 # אל תכניס שורות שהן רק סכום סיכום!
                 if desc and not any(k in desc.lower() for k in end_kw):
                     service_items.append({
@@ -318,7 +316,6 @@ def extract_service_lines(text):
 
     # --- 2. fallback: אם לא נמצאה אף שורת שירות אמיתית, חפש כמו בקוד הישן ---
     if not service_items:
-        # קח שורה שמכילה מילת מפתח לתיאור שירות (service/agreement/description) + סכום באותה שורה
         for idx, line in enumerate(lines):
             if re.search(r"(?i)(service|услуга|agreement|based|description)", line) and re.search(r'([\d,]+\.\d{2})', line):
                 desc_match = re.match(r'^(.*?)([\d,]+\.\d{2})$', line)
@@ -331,10 +328,11 @@ def extract_service_lines(text):
                             'line_total': line_total,
                             'ServiceDate': extract_service_date(line)
                         })
-                        break  # מצאנו — מספיק אחד!
-        # אם עדיין לא נמצא, חפש שורת שירות קלאסית עם מספר+תיאור (1 Consulting...)
+                        break  # fallback: רק אחד
+
+        # גם fallback קלאסי: שורה שמתחילה במספר + תיאור
         if not service_items:
-            for line in lines:
+            for idx, line in enumerate(lines):
                 m = re.match(r"^\d+\s+(.+)", line)
                 if m:
                     desc = m.group(1).strip()
@@ -354,6 +352,9 @@ def extract_service_lines(text):
                             'ServiceDate': extract_service_date(line)
                         })
                         break
+
+    return service_items
+
 
     return service_items
 

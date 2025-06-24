@@ -1,3 +1,4 @@
+
 import os
 import re
 import datetime
@@ -76,6 +77,7 @@ def transliterate_to_bulgarian(text):
         lower_char = char.lower()
         if lower_char in trans_map:
             trans_char = trans_map[lower_char]
+            # Preserve capitalization
             result += trans_char.upper() if char.isupper() else trans_char
         else:
             result += char
@@ -275,8 +277,9 @@ def extract_service_lines(text):
             in_table = True
             i += 1
             continue
-
-        if in_table:
+        
+        is_potential_service = len(line) > 3 and not line.lower().startswith(tuple(start_kw))
+        if in_table or is_potential_service:
             line_text_for_date = line
             amount_match = re.search(r'([\d,]+\.\d{2})$', line)
             current_line_desc = line
@@ -292,6 +295,7 @@ def extract_service_lines(text):
             else:
                 i += 1
                 continue
+
             service_items.append({
                 'description': current_line_desc,
                 'line_total': line_total,
@@ -328,7 +332,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         
         required_supplier_fields = ["SupplierName", "SupplierCompanyVAT", "IBAN", "Bankname"]
         for field in required_supplier_fields:
-            if pd.isna(supplier_data.get(field)) or not str(supplier_data.get(field)).strip():
+            if pd.isna(supplier_data.get(field)) or not str(supplier_data.get(field) or '').strip():
                  raise HTTPException(status_code=400, detail=f"Critical: Supplier field '{field}' is missing in Excel for the given ID.")
         log(f"Loaded Supplier Data for: {supplier_data['SupplierName']}")
         
@@ -397,20 +401,24 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
              processing_errors.append("Warning: Customer name not detected – check invoice OCR.")
              recipient_name_final = "N/A"
         elif not is_latin_only(recipient_name_raw):
-            processing_errors.append("Warning: Customer name not in Latin characters. Translation will be attempted.")
+            processing_errors.append("Warning: Customer name not in Latin characters – translation attempted.")
             recipient_name_final = auto_translate(recipient_name_raw) or recipient_name_raw
         else:
             recipient_name_final = transliterate_to_bulgarian(recipient_name_raw)
 
         recipient_address_raw = customer_details.get('address', '').strip()
-        recipient_address_final = auto_translate(recipient_address_raw) or "N/A"
+        recipient_address_final = auto_translate(recipient_address_raw)
+        if not recipient_address_final:
+            processing_errors.append("Warning: Failed to translate customer address, using transliteration as fallback.")
+            recipient_address_final = transliterate_to_bulgarian(recipient_address_raw) or "N/A"
         if not customer_details.get('address'): processing_errors.append("Warning: Customer address could not be extracted.")
-        elif recipient_address_final == "N/A": processing_errors.append("Warning: Failed to translate customer address.")
 
         recipient_city_raw = customer_details.get('city', '').strip()
-        recipient_city_final = auto_translate(recipient_city_raw) or "N/A"
+        recipient_city_final = auto_translate(recipient_city_raw)
+        if not recipient_city_final:
+            processing_errors.append("Warning: Failed to translate customer city, using transliteration as fallback.")
+            recipient_city_final = transliterate_to_bulgarian(recipient_city_raw) or "N/A"
         if not customer_details.get('city'): processing_errors.append("Warning: Customer city could not be extracted.")
-        elif recipient_city_final == "N/A": processing_errors.append("Warning: Failed to translate customer city.")
 
         if not customer_details.get('vat') and not customer_details.get('id'):
             processing_errors.append("Warning: Customer VAT or ID could not be extracted.")
@@ -430,16 +438,16 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "RecipientName": recipient_name_final.strip(),
             "RecipientID": (customer_details.get('id') or (customer_details.get('vat', '').replace("BG",""))).strip(),
             "RecipientVAT": customer_details.get('vat', "N/A").strip(),
-            "RecipientAddress": recipient_address_final.strip(),
-            "RecipientCity": recipient_city_final.strip(),
+            "RecipientAddress": recipient_address_final,
+            "RecipientCity": recipient_city_final,
             "RecipientCountry": "България",
-            "SupplierName": str(supplier_data["SupplierName"]).strip(),
+            "SupplierName": auto_translate(str(supplier_data["SupplierName"])).strip(),
             "SupplierCompanyID": str(supplier_data["SupplierCompanyID"]).strip(),
             "SupplierCompanyVAT": str(supplier_data["SupplierCompanyVAT"]).strip(),
-            "SupplierAddress": str(supplier_data["SupplierAddress"]).strip(),
-            "SupplierCity": str(supplier_data["SupplierCity"]).strip(),
+            "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])).strip(),
+            "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])).strip(),
             "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]).strip(),
-            "IBAN": str(supplier_data["IBAN"]).strip(), "BankName": str(supplier_data["Bankname"]).strip(), "BankCode": str(supplier_data["BankCode"]).strip(),
+            "IBAN": str(supplier_data["IBAN"]).strip(), "BankName": auto_translate(str(supplier_data["Bankname"])).strip(), "BankCode": str(supplier_data["BankCode"]).strip(),
             "AmountBGN": f"{base_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
             "VATAmount": f"{vat_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
             "vat_percent": vat_percent,

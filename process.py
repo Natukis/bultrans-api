@@ -1,5 +1,3 @@
-# process.py - The final, definitive version with the new robust parsing engine.
-
 import os
 import re
 import datetime
@@ -175,8 +173,6 @@ def upload_to_drive(local_path, filename):
                 return None
     return None
 
-# --- Extraction Engine ---
-
 def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
     if filename.lower().endswith(".pdf"):
@@ -202,83 +198,102 @@ def clean_number(num_str):
     try: return float(num_str)
     except: return 0.0
 
-def extract_invoice_data(text, supplier_name_from_excel):
-    # This is the new, unified parsing engine
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    
-    # Data dictionaries
-    invoice_details = {'date': None, 'date_str': None, 'currency': None}
-    customer_details = {'name': '', 'vat': '', 'id':'', 'address': '', 'city': ''}
+def extract_invoice_date(text):
+    patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            raw_date = match.group(1).strip()
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
+                try:
+                    dt = datetime.datetime.strptime(raw_date, fmt)
+                    return dt.strftime("%d.%m.%Y"), dt
+                except ValueError: continue
+    return None, None
+
+def extract_customer_details(text, supplier_name=""):
+    details = {'name': '', 'vat': '', 'id': '', 'address': '', 'city': ''}
+    lines = text.splitlines()
+    for line in lines:
+        line_lower = line.lower()
+        if not details['name'] and any(keyword in line_lower for keyword in ['customer name:', 'bill to:', 'invoice to:']):
+            raw_name = line.split(':', 1)[-1].strip()
+            if supplier_name:
+                raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE)
+            details['name'] = re.sub(r'(?i)\bsupplier\b|:', '', raw_name).strip()
+        elif not details['vat'] and "vat" in line_lower:
+            vat_match = re.search(r'(BG\d+)', line, re.IGNORECASE)
+            if vat_match: details['vat'] = vat_match.group(1).strip()
+        elif not details['id'] and any(keyword in line_lower for keyword in ["id no", "uic", "company no", "tax id"]):
+             id_match = re.search(r'\b(\d{7,15})\b', line)
+             if id_match: details['id'] = id_match.group(0).strip()
+        elif not details['address'] and "address:" in line_lower:
+            details['address'] = line.split(':', 1)[-1].strip()
+        elif not details['city'] and "city:" in line_lower:
+            details['city'] = line.split(':', 1)[-1].strip()
+    return details
+
+def extract_service_date(text_block):
+    bg_months = {1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни", 7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"}
+    match1 = re.search(r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b', text_block, re.IGNORECASE)
+    if match1:
+        month_name_en, year = match1.group(1), match1.group(2)
+        try:
+            month_dt = datetime.datetime.strptime(month_name_en, "%B")
+            return f"м.{bg_months[month_dt.month]} {year}"
+        except ValueError: pass
+    match2 = re.search(r'\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b', text_block)
+    if match2:
+        try:
+            parts = re.split(r'[./-]', match2.group(1))
+            if len(parts) == 3:
+                month, year = int(parts[1]), int(parts[2])
+                if year < 100: year += 2000
+                return f"м.{bg_months[month]} {year}"
+        except: pass
+    return "м.НЯМА ДАТА"
+
+def extract_service_lines(text):
     service_items = []
-    
-    # State flags for parsing
-    in_recipient_block = False
-    in_items_table = False
-
-    # Keywords
-    recipient_keywords = ['invoice to:', 'bill to:', 'customer name:']
-    table_start_keywords = ['description', 'item', 'activity']
-    table_end_keywords = ['subtotal', 'total', 'thank you']
-    
-    for i, line in enumerate(lines):
-        line_lower = line.lower().strip()
-
-        # Extract main invoice date once
-        if not invoice_details['date']:
-            date_patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})"]
-            for pattern in date_patterns:
-                match = re.search(pattern, line)
-                if match:
-                    raw_date = match.group(1).strip()
-                    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y"):
-                        try:
-                            dt = datetime.datetime.strptime(raw_date, fmt)
-                            invoice_details['date'] = dt
-                            invoice_details['date_str'] = dt.strftime("%d.%m.%Y")
-                            break
-                        except ValueError: continue
-                if invoice_details['date']: break
-
-        # --- Recipient Block Logic ---
-        if any(keyword in line_lower for keyword in recipient_keywords):
-            in_recipient_block = True
-            potential_name = line.split(':', 1)[-1].strip()
-            if len(potential_name) > 2: customer_details['name'] = potential_name
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat']
+    start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
+    i = 0
+    in_table = False
+    while i < len(lines):
+        line = lines[i]
+        line_lower = line.lower()
+        if any(k in line_lower for k in end_kw):
+            in_table = False
+            i += 1
             continue
-        
-        # Stop recipient block if we hit the table or totals
-        if any(keyword in line_lower for keyword in table_start_keywords + table_end_keywords):
-            in_recipient_block = False
-
-        if in_recipient_block:
-            if not customer_details['name']: customer_details['name'] = line
-            elif 'vat' in line_lower:
-                 vat_match = re.search(r'(BG\d+)', line, re.IGNORECASE)
-                 if vat_match: customer_details['vat'] = vat_match.group(1)
-            else: customer_details['address'] += f"{line} "
-            
-        # --- Service Items Table Logic ---
-        if any(keyword in line_lower for keyword in table_start_keywords):
-            in_items_table = True
+        if any(k in line_lower for k in start_kw):
+            in_table = True
+            i += 1
             continue
-        
-        if in_items_table:
+        if in_table:
+            line_text_for_date = line
             amount_match = re.search(r'([\d,]+\.\d{2})$', line)
+            current_line_desc = line
             if amount_match:
-                desc = line.replace(amount_match.group(1), '').strip()
-                desc = re.sub(r'^\d+\s*', '', desc)
-                service_items.append({
-                    'description': desc,
-                    'line_total': clean_number(amount_match.group(1))
-                })
-
-    # Post-processing and cleanup
-    if supplier_name_from_excel:
-        customer_details['name'] = re.sub(re.escape(supplier_name_from_excel), '', customer_details['name'], flags=re.IGNORECASE).strip()
-    customer_details['address'] = customer_details['address'].strip()
-
-    return invoice_details, customer_details, service_items
-
+                line_total = clean_number(amount_match.group(1))
+                current_line_desc = re.sub(r'\s{2,}.*$', '', line.replace(amount_match.group(1), '')).strip()
+                i += 1
+            elif i + 1 < len(lines) and re.fullmatch(r'[\d,]+\.\d{2}', lines[i+1].strip()):
+                line_total = clean_number(lines[i+1])
+                line_text_for_date += f" {lines[i+1]}"
+                i += 2
+            else:
+                i += 1
+                continue
+            service_items.append({
+                'description': current_line_desc,
+                'line_total': line_total,
+                'ServiceDate': extract_service_date(line_text_for_date)
+            })
+        else:
+            i += 1
+    return service_items
 
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5
@@ -288,7 +303,6 @@ def get_template_path_by_rows(num_rows: int) -> str:
         raise FileNotFoundError(f"Template file not found: {path}")
     return path
 
-# --- Main Endpoint ---
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     processing_errors = []
@@ -311,37 +325,121 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
                  raise HTTPException(status_code=400, detail=f"Critical: Supplier field '{field}' is missing in Excel for the given ID.")
         log(f"Loaded Supplier Data for: {supplier_data['SupplierName']}")
         
-        # --- Unified Data Extraction ---
-        invoice_details, customer_details, service_items_raw = extract_invoice_data(text, supplier_data['SupplierName'])
-
-        main_date_str = invoice_details['date_str']
-        main_date_obj = invoice_details['date']
+        main_date_str, main_date_obj = extract_invoice_date(text)
         if not main_date_obj:
             processing_errors.append("Warning: Invoice date not found. Used current date as fallback.")
             main_date_obj = datetime.datetime.now()
             main_date_str = main_date_obj.strftime("%d.%m.%Y")
+        log(f"Extracted Invoice Date: {main_date_str}")
         
-        service_items = [item for item in service_items_raw if item.get('line_total', 0) > 0]
+        service_items = [item for item in extract_service_lines(text) if item.get('line_total', 0) > 0]
         if not service_items:
             raise HTTPException(status_code=400, detail="Critical: No valid service lines found in the invoice.")
         if len(service_items) > 5:
             processing_errors.append(f"Warning: Only the first 5 service lines were included, the rest were omitted.")
+        log(f"Extracted and validated {len(service_items)} service lines.")
+
+        customer_details = extract_customer_details(text, supplier_data["SupplierName"])
+        log(f"Extracted Customer Details: {customer_details}")
         
-        # ... (currency detection and exchange rate logic with warnings) ...
-        
+        currency_map = {"€": "EUR", "$": "USD", "£": "GBP", "euro": "EUR", "usd": "USD"}
+        currency = DEFAULT_CURRENCY
+        detected = False
+        text_lower = text.lower()
+        for symbol, code in currency_map.items():
+            if symbol in text_lower: currency, detected = code, True; break
+        if not detected:
+            currency_match = re.search(r'\b([A-Z]{3})\b', text)
+            if currency_match: currency = currency_match.group(1)
+        if not detected and not currency_match:
+            log(f"⚠️ Could not detect a specific currency. Defaulting to {DEFAULT_CURRENCY}.")
+        log(f"Detected currency: {currency}")
+
+        exchange_rate = fetch_exchange_rate(main_date_obj, currency)
+        if exchange_rate is None:
+            processing_errors.append(f"Warning: No exchange rate found for currency {currency} on {main_date_str}. Calculations done using 1.0.")
+            exchange_rate = 1.0
+        log(f"Fetched exchange rate: {exchange_rate}")
+
         row_context = {}
         for idx, item in enumerate(service_items[:5], start=1):
-            # ... (build numbered context) ...
+            translated_desc = auto_translate(item["description"])
+            if translated_desc is None:
+                processing_errors.append(f"Warning: Translation failed for service line {idx}. Using original description.")
+                translated_desc = item["description"]
+            
+            service_date_str = item.get("ServiceDate", "м.НЯМА ДАТА")
+            if service_date_str == "м.НЯМА ДАТА":
+                processing_errors.append(f"Warning: No date found in service description for line {idx}.")
+            
+            final_description = f"{translated_desc.strip()} {service_date_str}" if service_date_str != "м.НЯМА ДАТА" else translated_desc.strip()
+            
+            row_context[f"RN{idx}"] = idx
+            row_context[f"ServiceDescription{idx}"] = final_description
+            row_context[f"Cur{idx}"] = currency
+            row_context[f"Amount{idx}"] = f"{item['line_total']:.2f}"
+            row_context[f"UnitPrice{idx}"] = f"{exchange_rate:.5f}"
+            row_context[f"LineTotal{idx}"] = f"{round(item['line_total'] * exchange_rate, 2):.2f}"
+
+        # Final processing for customer fields
+        recipient_name_raw = customer_details.get('name', '').strip()
+        if not recipient_name_raw:
+             processing_errors.append("Warning: Customer name not detected – check invoice OCR.")
+             recipient_name_final = "N/A"
+        elif not is_latin_only(recipient_name_raw):
+            processing_errors.append("Warning: Customer name not in Latin characters. Translation will be attempted.")
+            recipient_name_final = auto_translate(recipient_name_raw) or recipient_name_raw
+        else:
+            recipient_name_final = transliterate_to_bulgarian(recipient_name_raw)
+        
+        recipient_address_final = auto_translate(customer_details.get('address', '').strip()) or "N/A"
+        if not customer_details.get('address'): processing_errors.append("Warning: Customer address could not be extracted.")
+            
+        recipient_city_final = auto_translate(customer_details.get('city', '').strip()) or "N/A"
+        if not customer_details.get('city'): processing_errors.append("Warning: Customer city could not be extracted.")
+
+        if not customer_details.get('vat') and not customer_details.get('id'):
+            processing_errors.append("Warning: Customer VAT or ID could not be extracted.")
+
+        total_original = sum(item['line_total'] for item in service_items)
+        vat_percent = DEFAULT_VAT_PERCENT
+        base_bgn = round(total_original * exchange_rate, 2)
+        vat_bgn = round(base_bgn * (vat_percent / 100), 2)
+        total_bgn = base_bgn + vat_bgn
+        
+        invoice_number = f"{int(supplier_data.get('Last invoice number', 0)) + 1:08d}"
+        df.loc[df["SupplierCompanyID"] == int(supplier_id), "Last invoice number"] = int(invoice_number)
+        df.to_excel(SUPPLIERS_PATH, index=False)
 
         base_context = {
-            # ... (build base context with all fields) ...
+            "InvoiceNumber": invoice_number, "Date": main_date_str,
+            "RecipientName": recipient_name_final.strip(),
+            "RecipientID": (customer_details.get('id') or (customer_details.get('vat', '').replace("BG",""))).strip(),
+            "RecipientVAT": customer_details.get('vat', "N/A").strip(),
+            "RecipientAddress": recipient_address_final.strip(),
+            "RecipientCity": recipient_city_final.strip(),
+            "RecipientCountry": "България",
+            "SupplierName": auto_translate(str(supplier_data["SupplierName"])).strip(),
+            "SupplierCompanyID": str(supplier_data["SupplierCompanyID"]).strip(),
+            "SupplierCompanyVAT": str(supplier_data["SupplierCompanyVAT"]).strip(),
+            "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])).strip(),
+            "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])).strip(),
+            "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]).strip(),
+            "IBAN": str(supplier_data["IBAN"]).strip(), "BankName": auto_translate(str(supplier_data["Bankname"])).strip(), "BankCode": str(supplier_data["BankCode"]).strip(),
+            "AmountBGN": f"{base_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
+            "VATAmount": f"{vat_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
+            "vat_percent": vat_percent,
+            "TotalBGN": f"{total_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
+            "TotalInWords": number_to_bulgarian_words(total_bgn, as_words=True),
+            "ExchangeRate": exchange_rate,
+            "TransactionBasis": "По сметка", "TransactionCountry": "България"
         }
         
         template_path = get_template_path_by_rows(len(service_items))
         tpl = DocxTemplate(template_path)
         
         merged_context = {**base_context, **row_context}
-        log(f"Final merged context for rendering: {merged_context}")
+        log(f"Final merged context: {merged_context}")
         
         tpl.render(merged_context)
         

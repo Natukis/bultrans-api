@@ -266,68 +266,37 @@ def extract_service_lines(text):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat']
     start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
-    i = 0
     in_table = False
+    i = 0
     while i < len(lines):
         line = lines[i]
         line_lower = line.lower()
-        if any(k in line_lower for k in end_kw):
-            in_table = False
-            i += 1
-            continue
+        # זיהוי התחלה/סוף של טבלה
         if any(k in line_lower for k in start_kw):
             in_table = True
             i += 1
             continue
+        if any(k in line_lower for k in end_kw):
+            in_table = False
+            i += 1
+            continue
+        # בתוך טבלה – תופס שירותים
         if in_table:
-            line_text_for_date = line
             amount_match = re.search(r'([\d,]+\.\d{2})$', line)
-            current_line_desc = line
             if amount_match:
+                current_line_desc = line.replace(amount_match.group(1), '').strip()
                 line_total = clean_number(amount_match.group(1))
-                current_line_desc = re.sub(r'\s{2,}.*$', '', line.replace(amount_match.group(1), '')).strip()
-                i += 1
-            elif i + 1 < len(lines) and re.fullmatch(r'[\d,]+\.\d{2}', lines[i+1].strip()):
-                line_total = clean_number(lines[i+1])
-                line_text_for_date += f" {lines[i+1]}"
-                i += 2
-            else:
-                i += 1
-                continue
-            service_items.append({
-                'description': current_line_desc,
-                'line_total': line_total,
-                'ServiceDate': extract_service_date(line_text_for_date)
-            })
+                # בודק שלא מדובר רק בסכום (למשל "Total Amount Due") – חייב שיהיה לפחות עוד מילה אחת חוץ מ-Total/Subtotal וכד'
+                if current_line_desc and not any(k in current_line_desc.lower() for k in end_kw):
+                    service_items.append({
+                        'description': current_line_desc,
+                        'line_total': line_total,
+                        'ServiceDate': extract_service_date(line)
+                    })
+            i += 1
         else:
             i += 1
-
-    # Fallback: Try to extract a single total if no service lines found
-    if not service_items:
-        for idx, line in enumerate(lines):
-            m = re.search(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})', line)
-            if m:
-                amount = clean_number(m.group(1))
-                if amount > 0:
-                    # השתמש בשורה שמעל (אם יש) בתור תיאור
-                    desc = ""
-                    if idx > 0:
-                        prev_line = lines[idx - 1].strip()
-                        if prev_line and not re.search(r'\d{1,3}(?:[.,]\d{3})*[.,]\d{2}', prev_line):
-                            desc = prev_line
-                    if not desc:
-                        desc = line[:m.start()].strip()
-                    if not desc:
-                        desc = "Total Amount Due"
-                    service_items.append({
-                        "description": desc,
-                        "line_total": amount,
-                        "ServiceDate": "м.НЯМА ДАТА"
-                    })
-                    break
-
     return service_items
-
 
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5

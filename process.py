@@ -46,6 +46,7 @@ def is_latin_only(text):
     if not text: return True
     return bool(re.match(r'^[a-zA-Z0-9\s.,&:\-()/\\\'"]+$', text))
 
+# TODO: Add unit tests for this function
 def auto_translate(text, target_lang="bg"):
     if not text or not isinstance(text, str) or not text.strip(): return ""
     try:
@@ -65,6 +66,7 @@ def auto_translate(text, target_lang="bg"):
         log(f"❌ Translation failed: {e}")
         return None
 
+# TODO: Add unit tests for this function
 def transliterate_to_bulgarian(text):
     if not text: return ""
     text = text.strip()
@@ -200,6 +202,7 @@ def clean_number(num_str):
     try: return float(num_str)
     except: return 0.0
 
+# TODO: Add unit tests for this function
 def extract_invoice_date(text):
     patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
     for pattern in patterns:
@@ -260,19 +263,20 @@ def extract_service_lines(text):
     service_items = []
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat']
+    start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
     i = 0
+    in_table = False
     while i < len(lines):
         line = lines[i]
-        if any(k in line.lower() for k in end_kw):
+        line_lower = line.lower()
+        if any(k in line_lower for k in end_kw):
             break
-        
-        start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
-        if any(k in line.lower() for k in start_kw):
+        if any(k in line_lower for k in start_kw):
+            in_table = True
             i += 1
             continue
 
-        is_potential_service = len(line) > 3
-        if is_potential_service:
+        if in_table:
             line_text_for_date = line
             amount_match = re.search(r'([\d,]+\.\d{2})$', line)
             current_line_desc = line
@@ -288,7 +292,6 @@ def extract_service_lines(text):
             else:
                 i += 1
                 continue
-
             service_items.append({
                 'description': current_line_desc,
                 'line_total': line_total,
@@ -306,6 +309,7 @@ def get_template_path_by_rows(num_rows: int) -> str:
         raise FileNotFoundError(f"Template file not found: {path}")
     return path
 
+# --- Main Endpoint ---
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     processing_errors = []
@@ -388,31 +392,25 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             row_context[f"UnitPrice{idx}"] = f"{exchange_rate:.5f}"
             row_context[f"LineTotal{idx}"] = f"{round(item['line_total'] * exchange_rate, 2):.2f}"
 
-        # Handle Customer Name
         recipient_name_raw = customer_details.get('name', '').strip()
         if not recipient_name_raw:
              processing_errors.append("Warning: Customer name not detected – check invoice OCR.")
              recipient_name_final = "N/A"
         elif not is_latin_only(recipient_name_raw):
-            processing_errors.append("Warning: Customer name not in Latin characters – translation attempted.")
+            processing_errors.append("Warning: Customer name not in Latin characters. Translation will be attempted.")
             recipient_name_final = auto_translate(recipient_name_raw) or recipient_name_raw
         else:
             recipient_name_final = transliterate_to_bulgarian(recipient_name_raw)
 
-        # ⭐️ IMPROVEMENT: Translate address/city first, then fallback to transliterate
         recipient_address_raw = customer_details.get('address', '').strip()
-        recipient_address_final = auto_translate(recipient_address_raw)
-        if not recipient_address_final:
-            processing_errors.append("Warning: Failed to translate customer address, using transliteration as fallback.")
-            recipient_address_final = transliterate_to_bulgarian(recipient_address_raw) or "N/A"
-        if recipient_address_final == "N/A": processing_errors.append("Warning: Customer address could not be extracted.")
+        recipient_address_final = auto_translate(recipient_address_raw) or "N/A"
+        if not customer_details.get('address'): processing_errors.append("Warning: Customer address could not be extracted.")
+        elif recipient_address_final == "N/A": processing_errors.append("Warning: Failed to translate customer address.")
 
         recipient_city_raw = customer_details.get('city', '').strip()
-        recipient_city_final = auto_translate(recipient_city_raw)
-        if not recipient_city_final:
-            processing_errors.append("Warning: Failed to translate customer city, using transliteration as fallback.")
-            recipient_city_final = transliterate_to_bulgarian(recipient_city_raw) or "N/A"
-        if recipient_city_final == "N/A": processing_errors.append("Warning: Customer city could not be extracted.")
+        recipient_city_final = auto_translate(recipient_city_raw) or "N/A"
+        if not customer_details.get('city'): processing_errors.append("Warning: Customer city could not be extracted.")
+        elif recipient_city_final == "N/A": processing_errors.append("Warning: Failed to translate customer city.")
 
         if not customer_details.get('vat') and not customer_details.get('id'):
             processing_errors.append("Warning: Customer VAT or ID could not be extracted.")
@@ -429,19 +427,19 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
 
         base_context = {
             "InvoiceNumber": invoice_number, "Date": main_date_str,
-            "RecipientName": recipient_name_final,
+            "RecipientName": recipient_name_final.strip(),
             "RecipientID": (customer_details.get('id') or (customer_details.get('vat', '').replace("BG",""))).strip(),
-            "RecipientVAT": customer_details.get('vat', "N/A"),
-            "RecipientAddress": recipient_address_final,
-            "RecipientCity": recipient_city_final,
+            "RecipientVAT": customer_details.get('vat', "N/A").strip(),
+            "RecipientAddress": recipient_address_final.strip(),
+            "RecipientCity": recipient_city_final.strip(),
             "RecipientCountry": "България",
-            "SupplierName": auto_translate(str(supplier_data["SupplierName"])).strip(),
+            "SupplierName": str(supplier_data["SupplierName"]).strip(),
             "SupplierCompanyID": str(supplier_data["SupplierCompanyID"]).strip(),
             "SupplierCompanyVAT": str(supplier_data["SupplierCompanyVAT"]).strip(),
-            "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])).strip(),
-            "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])).strip(),
+            "SupplierAddress": str(supplier_data["SupplierAddress"]).strip(),
+            "SupplierCity": str(supplier_data["SupplierCity"]).strip(),
             "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]).strip(),
-            "IBAN": str(supplier_data["IBAN"]).strip(), "BankName": auto_translate(str(supplier_data["Bankname"])).strip(), "BankCode": str(supplier_data["BankCode"]).strip(),
+            "IBAN": str(supplier_data["IBAN"]).strip(), "BankName": str(supplier_data["Bankname"]).strip(), "BankCode": str(supplier_data["BankCode"]).strip(),
             "AmountBGN": f"{base_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
             "VATAmount": f"{vat_bgn:,.2f}".replace(",", "X").replace(".", ",").replace("X", " "),
             "vat_percent": vat_percent,

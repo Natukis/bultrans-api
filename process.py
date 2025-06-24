@@ -274,16 +274,22 @@ def extract_service_date(text_block):
     return "м.НЯМА ДАТА"
 
 def extract_service_lines(text):
+    """
+    זיהוי שורות שירות אמיתיות מחשבונית (טבלאות או תיאור חופשי), ומניעת שורות סכום בלבד.
+    """
     service_items = []
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat']
-    start_kw = ['description', 'descrizione', 'item', 'activity', 'amount']
+    end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat', 'amount due']
+    start_kw = ['description', 'descrizione', 'item', 'activity', 'amount', 'service']
     in_table = False
     i = 0
+
+    # --- 1. זיהוי לפי טבלה קלאסית (אם קיימת) ---
     while i < len(lines):
         line = lines[i]
         line_lower = line.lower()
-        # זיהוי התחלה/סוף של טבלה
+
+        # Start/end of table
         if any(k in line_lower for k in start_kw):
             in_table = True
             i += 1
@@ -292,22 +298,63 @@ def extract_service_lines(text):
             in_table = False
             i += 1
             continue
-        # בתוך טבלה – תופס שירותים
+
         if in_table:
             amount_match = re.search(r'([\d,]+\.\d{2})$', line)
             if amount_match:
-                current_line_desc = line.replace(amount_match.group(1), '').strip()
+                desc = line.replace(amount_match.group(1), '').strip()
                 line_total = clean_number(amount_match.group(1))
-                # בודק שלא מדובר רק בסכום (למשל "Total Amount Due") – חייב שיהיה לפחות עוד מילה אחת חוץ מ-Total/Subtotal וכד'
-                if current_line_desc and not any(k in current_line_desc.lower() for k in end_kw):
+
+                # אל תכניס שורות שהן רק סכום סיכום!
+                if desc and not any(k in desc.lower() for k in end_kw):
                     service_items.append({
-                        'description': current_line_desc,
+                        'description': desc,
                         'line_total': line_total,
                         'ServiceDate': extract_service_date(line)
                     })
             i += 1
         else:
             i += 1
+
+    # --- 2. fallback: אם לא נמצאה אף שורת שירות אמיתית, חפש כמו בקוד הישן ---
+    if not service_items:
+        # קח שורה שמכילה מילת מפתח לתיאור שירות (service/agreement/description) + סכום באותה שורה
+        for idx, line in enumerate(lines):
+            if re.search(r"(?i)(service|услуга|agreement|based|description)", line) and re.search(r'([\d,]+\.\d{2})', line):
+                desc_match = re.match(r'^(.*?)([\d,]+\.\d{2})$', line)
+                if desc_match:
+                    desc = desc_match.group(1).strip()
+                    line_total = clean_number(desc_match.group(2))
+                    if desc and not any(k in desc.lower() for k in end_kw):
+                        service_items.append({
+                            'description': desc,
+                            'line_total': line_total,
+                            'ServiceDate': extract_service_date(line)
+                        })
+                        break  # מצאנו — מספיק אחד!
+        # אם עדיין לא נמצא, חפש שורת שירות קלאסית עם מספר+תיאור (1 Consulting...)
+        if not service_items:
+            for line in lines:
+                m = re.match(r"^\d+\s+(.+)", line)
+                if m:
+                    desc = m.group(1).strip()
+                    # נסה למצוא סכום בשורה/בשורה הבאה
+                    amount = None
+                    am = re.search(r'([\d,]+\.\d{2})', line)
+                    if am:
+                        amount = clean_number(am.group(1))
+                    elif idx+1 < len(lines):
+                        am_next = re.search(r'([\d,]+\.\d{2})', lines[idx+1])
+                        if am_next:
+                            amount = clean_number(am_next.group(1))
+                    if desc and amount:
+                        service_items.append({
+                            'description': desc,
+                            'line_total': amount,
+                            'ServiceDate': extract_service_date(line)
+                        })
+                        break
+
     return service_items
 
 def get_template_path_by_rows(num_rows: int) -> str:

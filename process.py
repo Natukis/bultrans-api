@@ -47,6 +47,7 @@ def is_latin_only(text):
     return bool(re.match(r'^[a-zA-Z0-9\s.,&:\-()/\\\'"]+$', text))
 
 def auto_translate(text, target_lang="bg"):
+    # TODO: Add unit tests for this function
     if not text or not isinstance(text, str) or not text.strip(): return ""
     try:
         if is_cyrillic(text): return text
@@ -66,6 +67,7 @@ def auto_translate(text, target_lang="bg"):
         return None
 
 def transliterate_to_bulgarian(text):
+    # TODO: Add unit tests for this function
     if not text: return ""
     text = text.strip()
     trans_map = { 'a': 'а', 'b': 'б', 'c': 'ц', 'd': 'д', 'e': 'е', 'f': 'ф', 'g': 'г', 'h': 'х', 'i': 'и', 'j': 'дж', 'k': 'к', 'l': 'л', 'm': 'м', 'n': 'н', 'o': 'о', 'p': "п", 'q': "кю", 'r': "р", 's': "с", 't': "т", 'u': "у", 'v': "в", 'w': "у", 'x': "кс", 'y': "й", 'z': 'з' }
@@ -198,6 +200,7 @@ def clean_number(num_str):
     try: return float(num_str)
     except: return 0.0
 
+# TODO: Add unit tests for this function
 def extract_invoice_date(text):
     patterns = [r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2})", r"(\d{2}\.\d{2}\.\d{4})", r"(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s\d{1,2},\s\d{4})", r"(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{1,2},\s\d{4})"]
     for pattern in patterns:
@@ -214,6 +217,7 @@ def extract_invoice_date(text):
 def extract_customer_details(text, supplier_name=""):
     details = {'name': '', 'vat': '', 'id': '', 'address': '', 'city': ''}
     lines = text.splitlines()
+    id_keywords = ["id no", "uic", "company no", "tax id"]
     for line in lines:
         line_lower = line.lower()
         if not details['name'] and any(keyword in line_lower for keyword in ['customer name:', 'bill to:', 'invoice to:']):
@@ -224,7 +228,7 @@ def extract_customer_details(text, supplier_name=""):
         elif not details['vat'] and "vat" in line_lower:
             vat_match = re.search(r'(BG\d+)', line, re.IGNORECASE)
             if vat_match: details['vat'] = vat_match.group(1).strip()
-        elif not details['id'] and any(keyword in line_lower for keyword in ["id no", "uic", "company no", "tax id"]):
+        elif not details['id'] and any(keyword in line_lower for keyword in id_keywords):
              id_match = re.search(r'\b(\d{7,15})\b', line)
              if id_match: details['id'] = id_match.group(0).strip()
         elif not details['address'] and "address:" in line_lower:
@@ -381,21 +385,28 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             row_context[f"UnitPrice{idx}"] = f"{exchange_rate:.5f}"
             row_context[f"LineTotal{idx}"] = f"{round(item['line_total'] * exchange_rate, 2):.2f}"
 
-        # Final processing for customer fields
         recipient_name_raw = customer_details.get('name', '').strip()
         if not recipient_name_raw:
              processing_errors.append("Warning: Customer name not detected – check invoice OCR.")
              recipient_name_final = "N/A"
         elif not is_latin_only(recipient_name_raw):
-            processing_errors.append("Warning: Customer name not in Latin characters. Translation will be attempted.")
+            processing_errors.append("Warning: Customer name not in Latin characters – translation attempted.")
             recipient_name_final = auto_translate(recipient_name_raw) or recipient_name_raw
         else:
             recipient_name_final = transliterate_to_bulgarian(recipient_name_raw)
-        
-        recipient_address_final = auto_translate(customer_details.get('address', '').strip()) or "N/A"
+
+        recipient_address_raw = customer_details.get('address', '').strip()
+        recipient_address_final = auto_translate(recipient_address_raw)
+        if not recipient_address_final:
+            processing_errors.append("Warning: Failed to translate customer address, using transliteration as fallback.")
+            recipient_address_final = transliterate_to_bulgarian(recipient_address_raw) or "N/A"
         if not customer_details.get('address'): processing_errors.append("Warning: Customer address could not be extracted.")
-            
-        recipient_city_final = auto_translate(customer_details.get('city', '').strip()) or "N/A"
+
+        recipient_city_raw = customer_details.get('city', '').strip()
+        recipient_city_final = auto_translate(recipient_city_raw)
+        if not recipient_city_final:
+            processing_errors.append("Warning: Failed to translate customer city, using transliteration as fallback.")
+            recipient_city_final = transliterate_to_bulgarian(recipient_city_raw) or "N/A"
         if not customer_details.get('city'): processing_errors.append("Warning: Customer city could not be extracted.")
 
         if not customer_details.get('vat') and not customer_details.get('id'):

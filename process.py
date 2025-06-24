@@ -289,10 +289,6 @@ def extract_service_lines(text):
             in_table = True
             i += 1
             continue
-        if any(k in line_lower for k in end_kw):
-            in_table = False
-            i += 1
-            continue
 
         if in_table:
             amount_match = re.search(r'([\d,]+\.\d{2})$', line)
@@ -306,7 +302,9 @@ def extract_service_lines(text):
                         'line_total': line_total,
                         'ServiceDate': extract_service_date(line)
                     })
-            # ממשיכים תמיד – אין break
+            # עכשיו אחרי שמצאנו/לא מצאנו שירות, נבדוק אם זו שורת סיום טבלה:
+            if any(k in line_lower for k in end_kw):
+                in_table = False
         i += 1
 
     # fallback – כמו קודם – רק אם לא מצאנו אף שורת שירות בטבלה
@@ -349,7 +347,6 @@ def extract_service_lines(text):
                         break
 
     return service_items
-
 
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5

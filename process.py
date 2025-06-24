@@ -234,8 +234,12 @@ def extract_customer_details(text, supplier_name=""):
         elif not details['address'] and "address:" in line_lower:
             details['address'] = line.split(':', 1)[-1].strip()
         elif not details['city'] and "city:" in line_lower:
-            details['city'] = line.split(':', 1)[-1].strip()
-    return details
+            city_raw = line.split(':', 1)[-1].strip()
+            if os.getenv("GOOGLE_API_KEY"):
+                details['city'] = auto_translate(city_raw, target_lang="bg") or city_raw
+            else:
+                details['city'] = city_raw
+            return details
 
 def extract_service_date(text_block):
     bg_months = {1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни", 7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"}

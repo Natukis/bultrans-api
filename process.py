@@ -108,7 +108,7 @@ def number_to_bulgarian_words(amount):
                     ones_word = word_map.get(n % 10, "")
                     parts.append(f"{tens_word}{' и ' + ones_word if ones_word else ''}")
             return " ".join(parts)
-        leva_words = convert(leva).capitalize()
+        leva_words = convert(leva)
         return f"{leva_words} лева и {stotinki:02d} стотинки"
     except Exception as e:
         log(f"Error in number_to_bulgarian_words: {e}")

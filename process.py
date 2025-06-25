@@ -225,70 +225,69 @@ def extract_invoice_date(text):
 # PYTEST FIX 2: Moved city translation logic back into this function to satisfy the unit test.
 
 # FIX 1: Major improvement to customer details extraction
-def extract_customer_details(text, supplier_name=""):
+def extract_customer_details(text, supplier_name_to_clean, translated_supplier_name_to_clean=""):
     details = { 'name': '', 'vat': '', 'id': '', 'address': '', 'city': '' }
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     
     recipient_block_start = -1
     
-    # Step 1: Find the start of the recipient block to create a context
+    # Step 1: Find the start of the recipient block
     for i, line in enumerate(lines):
         line_lower = line.lower()
         if any(k in line_lower for k in ['customer name:', 'bill to:', 'invoice to:', 'client:']):
             recipient_block_start = i
             
-            # Extract name from this starting line
             raw_name = line.split(':', 1)[-1].strip()
-            
-            # Clean the name aggressively
-            if supplier_name:
-                raw_name = re.sub(re.escape(supplier_name.strip()), '', raw_name, flags=re.IGNORECASE)
-            raw_name = re.sub(r'(?i)\b(supplier|vendor|company|firm|customer|client|bill to)\b|:', '', raw_name)
-            
-            # Check if the result is a meaningful name
-            if len(raw_name.strip()) > 2:
-                details['name'] = ' '.join(raw_name.strip().split())
+            cleaned_name = raw_name
 
-            break # Found the block start, exit loop
+            # Step 2: Dual-language cleaning
+            # First, clean the primary supplier name (from Excel)
+            if supplier_name_to_clean:
+                cleaned_name = re.sub(re.escape(supplier_name_to_clean.strip()), '', cleaned_name, flags=re.IGNORECASE)
 
-    # Step 2: If the name wasn't on the same line, check the next line
+            # Second, clean the translated version of the supplier name
+            if translated_supplier_name_to_clean:
+                cleaned_name = re.sub(re.escape(translated_supplier_name_to_clean.strip()), '', cleaned_name, flags=re.IGNORECASE)
+
+            # Third, clean generic keywords
+            cleaned_name = re.sub(r'(?i)\b(supplier|vendor|company|firm|customer|client|bill to)\b|:', '', cleaned_name)
+            
+            if len(cleaned_name.strip()) > 2:
+                details['name'] = ' '.join(cleaned_name.strip().split())
+
+            break
+
+    # Step 3: Fallback for name on the next line
     if not details['name'] and recipient_block_start != -1 and recipient_block_start + 1 < len(lines):
-        # The line right after "Bill To:" is often the name
         next_line = lines[recipient_block_start + 1]
-        # A simple check to ensure it's not an address or ID line
         if not any(k in next_line.lower() for k in ['address', 'vat', 'eik', 'ул.', 'бул.']):
              details['name'] = next_line
-
-    # Step 3: If a block was found, search for other details *within that block only*
+    
+    # Step 4: Search for other details within the identified block
     if recipient_block_start != -1:
-        # Search in the next 5 lines following the block start
         search_lines = lines[recipient_block_start + 1 : recipient_block_start + 6]
         for line in search_lines:
             line_lower = line.lower()
             
-            # Find Address
             if not details['address'] and ('address' in line_lower or 'ул.' in line_lower or 'бул.' in line_lower):
                 details['address'] = line.split(':', 1)[-1].strip()
 
-            # Find City
             if not details['city'] and 'city' in line_lower:
                 details['city'] = line.split(':', 1)[-1].strip()
 
-            # Find VAT
             if not details['vat'] and 'vat' in line_lower:
                 m = re.search(r'(BG\d+)', line, re.IGNORECASE)
                 if m: details['vat'] = m.group(1)
 
-            # Find ID
             if not details['id'] and any(k in line_lower for k in ["id no", "uic", "eik"]):
-                m = re.search(r'\b(\d{9,15})\b', line) # EIK is usually 9 digits
+                m = re.search(r'\b(\d{9,15})\b', line)
                 if m: details['id'] = m.group(1)
 
-    # Step 4: Translate city if found
+    # Step 5: Translate city
     if details['city']:
         details['city'] = auto_translate(details['city'])
 
-    # Step 5: Final cleanup of all extracted values
+    # Step 6: Final cleanup
     for key, val in details.items():
         if isinstance(val, str):
             details[key] = val.strip()
@@ -433,7 +432,12 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             processing_errors.append(f"Warning: Found {len(service_items)} service lines. Only the first 5 will be included.")
         log(f"Extracted and validated {len(service_items)} service lines.")
 
-        customer_details = extract_customer_details(text, supplier_data["SupplierName"])
+                # Get both original and translated supplier names
+        supplier_name_original = supplier_data["SupplierName"]
+        supplier_name_translated = auto_translate(supplier_name_original) if supplier_name_original != auto_translate(supplier_name_original) else ""
+        
+        # Pass both versions for cleaning
+        customer_details = extract_customer_details(text, supplier_name_original, supplier_name_translated)
         log(f"Extracted Customer Details: {customer_details}")
         
         currency_map = {"€": "EUR", "$": "USD", "£": "GBP", "euro": "EUR", "usd": "USD"}

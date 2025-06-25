@@ -2,15 +2,14 @@ import pytest
 import re
 from datetime import datetime
 import os
-import pandas as pd # Import pandas to create mock data
+import pandas as pd
 
-# ייבוא הפונקציות מהקוד הראשי - עודכן לשמות החדשים
+# ייבוא הפונקציות מהקוד הראשי - עודכן סופית
 from process import (
     auto_translate,
     number_to_bulgarian_words,
     extract_invoice_date,
-    clean_number,
-    find_and_extract_recipient_details, # This is the new function
+    extract_recipient_details,
     extract_service_lines,
     get_template_path_by_rows
 )
@@ -32,27 +31,22 @@ def test_auto_translate():
         pytest.skip("Skipping translation test: GOOGLE_API_KEY not set")
 
 def test_number_to_bulgarian_words():
-    assert number_to_bulgarian_words(5640, as_words=False) == "5640 лв."
-    assert number_to_bulgarian_words(700, as_words=False) == "700 лв."
-    assert "пет хиляди" in number_to_bulgarian_words(5640, as_words=True)
-    assert "четиристотин" in number_to_bulgarian_words(469.4, as_words=True)
+    # Test the main functionality which now always returns words
+    assert "пет хиляди" in number_to_bulgarian_words(5640)
+    assert "четиристотин" in number_to_bulgarian_words(469.4)
+    assert "седемстотин лева и 00 стотинки" in number_to_bulgarian_words(700)
 
 def test_extract_invoice_date():
-    date_str, date_obj = extract_invoice_date("Invoice date: 18/08/2021")
-    assert date_str == "18.08.2021"
+    # The function now returns only a datetime object or None
+    date_obj = extract_invoice_date("Invoice date: 18/08/2021")
     assert isinstance(date_obj, datetime)
+    assert date_obj.strftime("%d.%m.%Y") == "18.08.2021"
     
-    date_str_none, date_obj_none = extract_invoice_date("Some random text without a date")
-    assert date_str_none is None
+    date_obj_none = extract_invoice_date("Some random text without a date")
     assert date_obj_none is None
 
-def test_clean_number():
-    assert clean_number("Total Amount: BGN 4,700.00") == 4700.0
-    assert clean_number("VAT Amount: BGN 940.00") == 940.0
-    assert clean_number("Total Amount of Bill: BGN 5.640,00") == 5640.0
-
-# --- THIS TEST IS REWRITTEN FOR THE NEW FUNCTION ---
-def test_find_and_extract_recipient_details():
+# --- THIS TEST IS REWRITTEN FOR THE NEW HYBRID FUNCTION ---
+def test_extract_recipient_details():
     text = (
         "Supplier Company Name\n"
         "Some Address for supplier\n"
@@ -69,7 +63,7 @@ def test_find_and_extract_recipient_details():
     })
 
     # Call the new function with the correct arguments
-    result = find_and_extract_recipient_details(text, supplier_data)
+    result = extract_recipient_details(text, supplier_data)
     
     assert result['name'] == "QUESTE LTD"
     assert result['vat'] == "BG203743737"

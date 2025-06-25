@@ -47,23 +47,23 @@ def is_latin_only(text):
     return bool(re.match(r'^[a-zA-Z0-9\s.,&:\-()/\\\'"]+$', text))
 
 def auto_translate(text, target_lang="bg"):
-    if not text or not isinstance(text, str) or not text.strip(): return ""
+    if not text or not isinstance(text, str) or not text.strip(): return text
     try:
         if is_cyrillic(text): return text
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
             log("ERROR: Missing GOOGLE_API_KEY. Cannot translate.")
-            return text # Return original text if no key
+            return text
         url = f"https://translation.googleapis.com/language/translate/v2?key={api_key}"
         payload = {"q": text, "target": target_lang}
         response = requests.post(url, json=payload, timeout=GOOGLE_API_TIMEOUT)
         if response.status_code == 200:
             return response.json()["data"]["translations"][0]["translatedText"].strip()
         log(f"Translation API error: {response.status_code} - {response.text}")
-        return text # Return original text on error
+        return text
     except Exception as e:
         log(f"❌ Translation failed: {e}")
-        return text # Return original text on exception
+        return text
 
 def transliterate_to_bulgarian(text):
     if not text: return ""
@@ -86,6 +86,7 @@ def number_to_bulgarian_words(amount, as_words=True):
         if as_words:
             word_map = {0: "нула", 1: "един", 2: "два", 3: "три", 4: "четири", 5: "пет", 6: "шест", 7: "седем", 8: "осем", 9: "девет", 10: "десет", 11: "единадесет", 12: "дванадесет", 13: "тринадесет", 14: "четиринадесет", 15: "петнадесет", 16: "шестнадесет", 17: "седемнадесет", 18: "осемнадесет", 19: "деветнадесет", 20: "двадесет", 30: "тридесет", 40: "четиридесет", 50: "петдесет", 60: "шестдесет", 70: "седемдесет", 80: "осемдесет", 90: "деветдесет"}
             def convert_to_words(n):
+                if n == 0: return "нула"
                 if n in word_map: return word_map[n]
                 parts = []
                 if n >= 1000:
@@ -100,10 +101,7 @@ def number_to_bulgarian_words(amount, as_words=True):
                     parts.append(hundreds_map.get(hundreds))
                     n %= 100
                 if n > 0:
-                    if parts and "хиляди" not in parts[-1] and "сто" not in parts[-1]:
-                        if n < 100: parts.append("и")
-                    elif not parts:
-                        pass # no 'and' for numbers like 21
+                    if parts: parts.append("и")
                     if n <= 20:
                         parts.append(word_map[n])
                     else:
@@ -113,7 +111,8 @@ def number_to_bulgarian_words(amount, as_words=True):
                         if ones > 0: parts.append(f"{tens_word} и {word_map[ones]}")
                         else: parts.append(tens_word)
                 return " ".join(filter(None, parts))
-            leva_words = convert_to_words(leva).capitalize()
+            # PYTEST FIX 1: Removed .capitalize() to match the test expectation of a lowercase start.
+            leva_words = convert_to_words(leva)
             return f"{leva_words} лева и {stotinki:02d} стотинки"
         else:
             leva_words = f"{leva} лв."
@@ -163,7 +162,6 @@ def upload_to_drive(local_path, filename):
             file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
             media = MediaFileUpload(local_path, resumable=True)
             file = service.files().create(body=file_metadata, media_body=media, fields="id, webViewLink").execute()
-            # Make file publicly readable
             service.permissions().create(fileId=file["id"], body={"type": "anyone", "role": "reader"}).execute()
             link = file.get("webViewLink")
             log(f"Successfully uploaded. Link: {link}")
@@ -182,10 +180,8 @@ def extract_text_from_file(file_path, filename):
     log(f"Extracting text from '{filename}'")
     if filename.lower().endswith((".pdf", ".PDF")):
         try:
-            # First try text extraction
             text = "\n".join(page.extract_text() or "" for page in PdfReader(file_path).pages)
             if len(text.strip()) > 50: return text
-            # Fallback to OCR
             log("Fallback to OCR for PDF.")
             return "\n".join(pytesseract.image_to_string(img, config='--psm 6') for img in convert_from_path(file_path, dpi=300))
         except Exception as e:
@@ -226,6 +222,7 @@ def extract_invoice_date(text):
                 except ValueError: continue
     return None, None
 
+# PYTEST FIX 2: Moved city translation logic back into this function to satisfy the unit test.
 def extract_customer_details(text, supplier_name=""):
     details = { 'name': '', 'vat': '', 'id': '', 'address': '', 'city': '' }
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -252,7 +249,9 @@ def extract_customer_details(text, supplier_name=""):
             details['address'] = line.split(':', 1)[-1].strip()
         
         if 'city:' in line_lower:
-            details['city'] = line.split(':', 1)[-1].strip()
+            city_raw = line.split(':', 1)[-1].strip()
+            # Translate city here to pass the test, which expects this function to do it.
+            details['city'] = auto_translate(city_raw)
 
     if not details['address']:
          for i, line in enumerate(lines):
@@ -450,7 +449,6 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
              recipient_name_final = transliterate_to_bulgarian(recipient_name_raw)
 
         recipient_address_final = auto_translate(customer_details.get('address', '')) or transliterate_to_bulgarian(customer_details.get('address', ''))
-        recipient_city_final = auto_translate(customer_details.get('city', '')) or transliterate_to_bulgarian(customer_details.get('city', ''))
         
         vat_percent = DEFAULT_VAT_PERCENT
         base_bgn = round(total_original_currency * exchange_rate, 2)
@@ -471,7 +469,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "RecipientID": (customer_details.get('id') or (customer_details.get('vat', '').replace("BG",""))).strip(),
             "RecipientVAT": customer_details.get('vat', "").strip(),
             "RecipientAddress": recipient_address_final,
-            "RecipientCity": recipient_city_final,
+            "RecipientCity": customer_details.get('city', ''), # Already translated in extract_customer_details
             "RecipientCountry": "България",
             "SupplierName": auto_translate(str(supplier_data["SupplierName"])),
             "SupplierCompanyID": str(supplier_data["SupplierCompanyID"]),
@@ -479,7 +477,6 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])),
             "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])),
             "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]),
-            # FINAL FIX: Use "BankName" to match Excel header
             "IBAN": str(supplier_data["IBAN"]), "BankName": auto_translate(str(supplier_data["BankName"])), "BankCode": str(supplier_data["BankCode"]),
             "AmountBGN": format_bgn(base_bgn),
             "VATAmount": format_bgn(vat_bgn),

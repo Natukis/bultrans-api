@@ -302,7 +302,7 @@ def find_and_extract_recipient_details(text: str, supplier_data: pd.Series) -> d
         log("Could not find a recipient keyword in any non-supplier block.")
 
     # Final cleanup
-    details['name'] = re.sub(r'(?i)\b(supplier|vendor|company|ltd|gmbh)\b', '', details['name'], flags=re.IGNORECASE).strip()
+    details['name'] = re.sub(r'(?i)\b(supplier|vendor|company|client|customer|bill to)\b', '', details['name'], flags=re.IGNORECASE).strip()
     details['name'] = ' '.join(details['name'].split())
 
     return details

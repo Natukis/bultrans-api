@@ -223,50 +223,77 @@ def extract_invoice_date(text):
     return None, None
 
 # PYTEST FIX 2: Moved city translation logic back into this function to satisfy the unit test.
+
+# FIX 1: Major improvement to customer details extraction
 def extract_customer_details(text, supplier_name=""):
     details = { 'name': '', 'vat': '', 'id': '', 'address': '', 'city': '' }
     lines = [l.strip() for l in text.splitlines() if l.strip()]
-
+    
+    recipient_block_start = -1
+    
+    # Step 1: Find the start of the recipient block to create a context
     for i, line in enumerate(lines):
         line_lower = line.lower()
-
-        if any(k in line_lower for k in ['customer name', 'bill to', 'invoice to', 'client']):
+        if any(k in line_lower for k in ['customer name:', 'bill to:', 'invoice to:', 'client:']):
+            recipient_block_start = i
+            
+            # Extract name from this starting line
             raw_name = line.split(':', 1)[-1].strip()
+            
+            # Clean the name aggressively
             if supplier_name:
-                raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE)
+                raw_name = re.sub(re.escape(supplier_name.strip()), '', raw_name, flags=re.IGNORECASE)
             raw_name = re.sub(r'(?i)\b(supplier|vendor|company|firm|customer|client|bill to)\b|:', '', raw_name)
-            if raw_name: details['name'] = raw_name.strip()
+            
+            # Check if the result is a meaningful name
+            if len(raw_name.strip()) > 2:
+                details['name'] = ' '.join(raw_name.strip().split())
 
-        if 'vat' in line_lower:
-            m = re.search(r'(BG\d+)', line, re.IGNORECASE)
-            if m: details['vat'] = m.group(1)
+            break # Found the block start, exit loop
 
-        if any(k in line_lower for k in ["id no", "uic", "company no", "tax id", "eik"]):
-            m = re.search(r'\b(\d{7,15})\b', line)
-            if m: details['id'] = m.group(1)
+    # Step 2: If the name wasn't on the same line, check the next line
+    if not details['name'] and recipient_block_start != -1 and recipient_block_start + 1 < len(lines):
+        # The line right after "Bill To:" is often the name
+        next_line = lines[recipient_block_start + 1]
+        # A simple check to ensure it's not an address or ID line
+        if not any(k in next_line.lower() for k in ['address', 'vat', 'eik', 'ул.', 'бул.']):
+             details['name'] = next_line
 
-        if 'address:' in line_lower:
-            details['address'] = line.split(':', 1)[-1].strip()
-        
-        if 'city:' in line_lower:
-            city_raw = line.split(':', 1)[-1].strip()
-            # Translate city here to pass the test, which expects this function to do it.
-            details['city'] = auto_translate(city_raw)
+    # Step 3: If a block was found, search for other details *within that block only*
+    if recipient_block_start != -1:
+        # Search in the next 5 lines following the block start
+        search_lines = lines[recipient_block_start + 1 : recipient_block_start + 6]
+        for line in search_lines:
+            line_lower = line.lower()
+            
+            # Find Address
+            if not details['address'] and ('address' in line_lower or 'ул.' in line_lower or 'бул.' in line_lower):
+                details['address'] = line.split(':', 1)[-1].strip()
 
-    if not details['address']:
-         for i, line in enumerate(lines):
-            if details['name'] and details['name'] in line:
-                if i + 1 < len(lines):
-                    next_line = lines[i+1]
-                    if len(next_line) > 5 and not any(k in next_line.lower() for k in ['vat', 'id', 'eik', 'uic']):
-                         details['address'] = next_line
-                         break
-                         
+            # Find City
+            if not details['city'] and 'city' in line_lower:
+                details['city'] = line.split(':', 1)[-1].strip()
+
+            # Find VAT
+            if not details['vat'] and 'vat' in line_lower:
+                m = re.search(r'(BG\d+)', line, re.IGNORECASE)
+                if m: details['vat'] = m.group(1)
+
+            # Find ID
+            if not details['id'] and any(k in line_lower for k in ["id no", "uic", "eik"]):
+                m = re.search(r'\b(\d{9,15})\b', line) # EIK is usually 9 digits
+                if m: details['id'] = m.group(1)
+
+    # Step 4: Translate city if found
+    if details['city']:
+        details['city'] = auto_translate(details['city'])
+
+    # Step 5: Final cleanup of all extracted values
     for key, val in details.items():
-        if isinstance(val, str): details[key] = val.strip()
+        if isinstance(val, str):
+            details[key] = val.strip()
 
     return details
-
 
 def extract_service_date(text_block):
     bg_months = {1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни", 7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"}
@@ -289,6 +316,7 @@ def extract_service_date(text_block):
         except: pass
     return ""
 
+# FIX 2: Remove leading numbers from service description
 def extract_service_lines(text):
     service_items = []
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -326,9 +354,12 @@ def extract_service_lines(text):
                 
                 amount_match = re.search(r'(\d[\d,.]*\d)', combined_line)
                 amount = clean_number(amount_match.group(1)) if amount_match else 0.0
+                
+                # Clean the leading number from the description
+                cleaned_description = re.sub(r'^\s*\d+[\.\)]?\s*', '', combined_line).strip()
 
                 service_items.append({
-                    'description': combined_line,
+                    'description': cleaned_description,
                     'line_total': amount,
                     'ServiceDate': extract_service_date(combined_line)
                 })
@@ -364,6 +395,8 @@ def get_template_path_by_rows(num_rows: int) -> str:
         return default_path
     return path
 
+@router.post("/process-invoice/")
+# FIX 3: Use MOL for payment basis and add IBAN validation
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     processing_errors = []
@@ -463,13 +496,24 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         def format_bgn(amount):
              return f"{amount:,.2f}".replace(",", " ").replace(".", ",")
 
+        # Logic for Transaction Basis (Payment)
+        transaction_basis = auto_translate(str(supplier_data.get("SupplierContactPerson", ""))) or "По сметка"
+        
+        # Logic for IBAN
+        iban_from_excel = str(supplier_data.get("IBAN", ""))
+        if "сметка" in iban_from_excel:
+            processing_errors.append(f"Warning: IBAN for supplier {supplier_id} contains placeholder text. Please correct in Excel.")
+            iban_final = ""
+        else:
+            iban_final = iban_from_excel
+
         base_context = {
             "InvoiceNumber": invoice_number, "Date": main_date_str,
             "RecipientName": recipient_name_final,
             "RecipientID": (customer_details.get('id') or (customer_details.get('vat', '').replace("BG",""))).strip(),
             "RecipientVAT": customer_details.get('vat', "").strip(),
             "RecipientAddress": recipient_address_final,
-            "RecipientCity": customer_details.get('city', ''), # Already translated in extract_customer_details
+            "RecipientCity": customer_details.get('city', ''),
             "RecipientCountry": "България",
             "SupplierName": auto_translate(str(supplier_data["SupplierName"])),
             "SupplierCompanyID": str(supplier_data["SupplierCompanyID"]),
@@ -477,14 +521,17 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])),
             "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])),
             "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]),
-            "IBAN": str(supplier_data["IBAN"]), "Bankname": auto_translate(str(supplier_data["Bankname"])), "BankCode": str(supplier_data["BankCode"]),
+            "IBAN": iban_final, 
+            "BankName": auto_translate(str(supplier_data["Bankname"])), 
+            "BankCode": str(supplier_data["BankCode"]),
             "AmountBGN": format_bgn(base_bgn),
             "VATAmount": format_bgn(vat_bgn),
             "vat_percent": int(vat_percent),
             "TotalBGN": format_bgn(total_bgn),
             "TotalInWords": number_to_bulgarian_words(total_bgn, as_words=True),
             "ExchangeRate": f"{exchange_rate:.5f}",
-            "TransactionBasis": "По сметка", "TransactionCountry": "България"
+            "TransactionBasis": transaction_basis, 
+            "TransactionCountry": "България"
         }
         
         template_path = get_template_path_by_rows(len(service_items))

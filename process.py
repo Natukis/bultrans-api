@@ -111,7 +111,6 @@ def number_to_bulgarian_words(amount, as_words=True):
                         if ones > 0: parts.append(f"{tens_word} и {word_map[ones]}")
                         else: parts.append(tens_word)
                 return " ".join(filter(None, parts))
-            # PYTEST FIX 1: Removed .capitalize() to match the test expectation of a lowercase start.
             leva_words = convert_to_words(leva)
             return f"{leva_words} лева и {stotinki:02d} стотинки"
         else:
@@ -188,10 +187,10 @@ def extract_text_from_file(file_path, filename):
             log(f"PDF extraction failed: {e}")
             return ""
     elif filename.lower().endswith((".docx", ".DOCX")):
-         try:
+        try:
             doc = Document(file_path)
             return "\n".join([para.text for para in doc.paragraphs])
-         except Exception as e:
+        except Exception as e:
             log(f"DOCX text extraction failed: {e}")
             return ""
     return ""
@@ -222,15 +221,12 @@ def extract_invoice_date(text):
                 except ValueError: continue
     return None, None
 
-# PYTEST FIX 2: Moved city translation logic back into this function to satisfy the unit test.
-
-# FIX 1: Major improvement to customer details extraction
 def find_and_extract_recipient_details(text: str, supplier_data: pd.Series) -> dict:
     """
     Finds recipient details by first identifying and isolating the supplier's text block,
     then searching for the recipient's details robustly, handling same-line and next-line cases.
     """
-    log("Starting V3 of Block Isolation method to find recipient...")
+    log("Starting Block Isolation method to find recipient...")
     details = { 'name': '', 'vat': '', 'id': '', 'address': '', 'city': '' }
     lines = [line for line in text.splitlines() if line.strip()]
     supplier_vat = str(supplier_data.get("SupplierCompanyVAT", ""))
@@ -342,7 +338,6 @@ def extract_service_date(text_block):
         except: pass
     return ""
 
-# FIX 2: Remove leading numbers from service description
 def extract_service_lines(text):
     service_items = []
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -381,7 +376,6 @@ def extract_service_lines(text):
                 amount_match = re.search(r'(\d[\d,.]*\d)', combined_line)
                 amount = clean_number(amount_match.group(1)) if amount_match else 0.0
                 
-                # Clean the leading number from the description
                 cleaned_description = re.sub(r'^\s*\d+[\.\)]?\s*', '', combined_line).strip()
 
                 service_items.append({
@@ -422,8 +416,6 @@ def get_template_path_by_rows(num_rows: int) -> str:
     return path
 
 @router.post("/process-invoice/")
-# FIX 3: Use MOL for payment basis and add IBAN validation
-@router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
     processing_errors = []
     file_path = f"/tmp/{file.filename}"
@@ -460,7 +452,10 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         log(f"Extracted and validated {len(service_items)} service lines.")
 
         # Use the new, robust Block Isolation method
-        customer_details = find_and_extract_recipient_details(text, supplier_data)
+        customer_details = find_and_extract_recipient_details(text, supplier_data)
+        if not customer_details.get('name'):
+            processing_errors.append("Warning: Could not reliably identify recipient details. Results may be incomplete.")
+
         log(f"Extracted Customer Details: {customer_details}")
         
         currency_map = {"€": "EUR", "$": "USD", "£": "GBP", "euro": "EUR", "usd": "USD"}

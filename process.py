@@ -289,50 +289,55 @@ def extract_service_date(text_block):
         except: pass
     return "м.НЯМА ДАТА"
 
-import re
-
-def extract_service_line(lines):
-    """
-    מוצא שורת שירות אחת מתוך רשימת שורות:
-    1) מחפש מילות מפתח 'Service','agreement','description' וכו'
-    2) אם נמצא, מאחד עם השורה הבאה אם זו לא תאריך/סכום
-    3) fallback: מחפש שורה שמתחילה במספר ומסתיימת בסכום
-    """
-    for i, line in enumerate(lines):
-        if re.search(r"(?i)(Service|услуга|agreement|based|description)", line):
-            combined = line.strip()
-            nxt = lines[i+1].strip() if i+1 < len(lines) else ""
-            if nxt and not re.search(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", nxt) and len(nxt) > 10:
-                combined += " " + nxt
-            return combined
-    for line in lines:
-        if re.match(r"^\d+\s+.+\s+([\d,]+\.\d{2})$", line):
-            return line.strip()
-    return ""
-
 def extract_service_lines(text):
     """
-    מוציא את שורת השירות (0 או 1 פריטים) מ־text מלא:
-    1) מפריד ל־lines
-    2) מוצא שורת שירות יחידה בעזרת extract_service_line
-    3) מאבחן מתוכה את התיאור, הסכום והתאריך
+    מוצא את כל שורות השירות בטבלה:
+    1. מחפש את השורה שבה מופיע 'Description' (כותרת הטבלה)
+    2. עובר על כל השורות שמתחתיה עד שמשיג 'Total' או 'Subtotal'
+    3. בכל שורה מוצא את הסכום בסוף השורה, וממנו גוזר תיאור ושומר במבנה
+    4. אם לא נמצאו פריטים בטבלה – מפעיל fallback לחיפוש שורה אחת עם 'service' + סכום
     """
+    service_items = []
     lines = [l.strip() for l in text.splitlines() if l.strip()]
-    service_line = extract_service_line(lines)
-    items = []
-    if service_line:
-        m = re.search(r'([\d,]+\.\d{2})$', service_line)
-        if m:
-            amt = clean_number(m.group(1))
-            desc = service_line[:m.start()].strip()
-            items.append({
-                'description': desc,
-                'line_total': amt,
-                'ServiceDate': extract_service_date(service_line)
-            })
-    return items
 
+    # 1) מצא את כותרת הטבלה
+    header_idx = None
+    for i, line in enumerate(lines):
+        if re.search(r'(?i)\bDescription\b', line):
+            header_idx = i
+            break
 
+    # 2) אם הכותרת נמצאה, קרא שורות עד 'Total'/'Subtotal'
+    if header_idx is not None:
+        for line in lines[header_idx + 1:]:
+            if re.search(r'(?i)\b(subtotal|total)\b', line):
+                break
+            m = re.search(r'([\d,]+\.\d{2})$', line)
+            if m:
+                amt_str = m.group(1)
+                desc = line[:m.start()].strip()
+                # ודא שלא מדובר בשורת סיכום
+                if desc and not re.search(r'(?i)\b(total|subtotal)\b', desc):
+                    service_items.append({
+                        'description': desc,
+                        'line_total': clean_number(amt_str),
+                        'ServiceDate': extract_service_date(line)
+                    })
+
+    # 3) fallback: חפש שורה עם 'service' וסכום
+    if not service_items:
+        for line in lines:
+            m = re.match(r'(.+?)\s+([\d,]+\.\d{2})$', line)
+            if m and re.search(r'(?i)service', m.group(1)):
+                desc, amt_str = m.group(1).strip(), m.group(2)
+                service_items.append({
+                    'description': desc,
+                    'line_total': clean_number(amt_str),
+                    'ServiceDate': extract_service_date(line)
+                })
+                break
+
+    return service_items
 
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5

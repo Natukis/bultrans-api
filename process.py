@@ -275,73 +275,46 @@ def extract_service_date(text_block):
 
 def extract_service_lines(text):
     service_items = []
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    end_kw = ['subtotal', 'imponibile', 'total', 'thank you', 'tax', 'vat', 'amount due']
-    start_kw = ['description', 'descrizione', 'item', 'activity', 'amount', 'service']
-    in_table = False
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
 
+    # חפש את אינדקס שורת הכותרת
+    header_idx = None
     for i, line in enumerate(lines):
-        line_lower = line.lower()
-        # start table
-        if any(k in line_lower for k in start_kw):
-            in_table = True
-            continue
-        # end table
-        if any(k in line_lower for k in end_kw):
-            in_table = False
-            continue
+        if re.search(r'(?i)\bDescription\b', line):
+            header_idx = i
+            break
 
-        if in_table:
-            amount_match = re.search(r'([\d,]+\.\d{2})$', line)
-            if amount_match:
-                desc = line.replace(amount_match.group(1), '').strip()
-                line_total = clean_number(amount_match.group(1))
-                # אל תכניס שורות שהן רק סכום סיכום!
-                if desc and not any(k in desc.lower() for k in end_kw):
+    # אם נמצאה כותרת, קרא שורות עד תת-טוטל
+    if header_idx is not None:
+        for line in lines[header_idx+1:]:
+            # אם הגענו לשורת Subtotal/Total – עצור
+            if re.search(r'(?i)\b(subtotal|total)\b', line):
+                break
+            m = re.search(r'([\d,]+\.\d{2})$', line)
+            if m:
+                amt_str = m.group(1)
+                desc = line[:m.start()].strip()
+                # ודא שלא מדובר בשורת סיכום
+                if desc and not re.search(r'(?i)\b(total|subtotal)\b', desc):
                     service_items.append({
                         'description': desc,
-                        'line_total': line_total,
+                        'line_total': clean_number(amt_str),
                         'ServiceDate': extract_service_date(line)
                     })
 
-    # fallback – כמו קודם – רק אם לא מצאנו אף שורת שירות בטבלה
+    # fallback למקרה שאין טבלה
     if not service_items:
-        for idx, line in enumerate(lines):
-            if re.search(r"(?i)(service|услуга|agreement|based|description)", line) and re.search(r'([\d,]+\.\d{2})', line):
-                desc_match = re.match(r'^(.*?)([\d,]+\.\d{2})$', line)
-                if desc_match:
-                    desc = desc_match.group(1).strip()
-                    line_total = clean_number(desc_match.group(2))
-                    if desc and not any(k in desc.lower() for k in end_kw):
-                        service_items.append({
-                            'description': desc,
-                            'line_total': line_total,
-                            'ServiceDate': extract_service_date(line)
-                        })
-                        break
-
-        # fallback נוסף: שורה שמתחילה במספר + תיאור
-        if not service_items:
-            for idx, line in enumerate(lines):
-                m = re.match(r"^\d+\s+(.+)", line)
-                if m:
-                    desc = m.group(1).strip()
-                    # נסה למצוא סכום בשורה/בשורה הבאה
-                    amount = None
-                    am = re.search(r'([\d,]+\.\d{2})', line)
-                    if am:
-                        amount = clean_number(am.group(1))
-                    elif idx+1 < len(lines):
-                        am_next = re.search(r'([\d,]+\.\d{2})', lines[idx+1])
-                        if am_next:
-                            amount = clean_number(am_next.group(1))
-                    if desc and amount:
-                        service_items.append({
-                            'description': desc,
-                            'line_total': amount,
-                            'ServiceDate': extract_service_date(line)
-                        })
-                        break
+        # חפש שירות המופיע באותו רצף שורה אחת עם סכום
+        for line in lines:
+            m = re.match(r'(.+?)\s+([\d,]+\.\d{2})$', line)
+            if m and re.search(r'(?i)service', m.group(1)):
+                desc, amt_str = m.group(1).strip(), m.group(2)
+                service_items.append({
+                    'description': desc,
+                    'line_total': clean_number(amt_str),
+                    'ServiceDate': extract_service_date(line)
+                })
+                break
 
     return service_items
 

@@ -203,6 +203,24 @@ def extract_recipient_details(text: str, supplier_data: pd.Series) -> dict:
 
     log("All methods failed to find recipient details.")
     return details
+    
+def get_template_path_by_rows(num_rows: int) -> str:
+    """Selects the correct docx template based on the number of service rows."""
+    max_supported = 5
+    # If there are more than 5 rows, use the 5-row template. If 0 rows, use the 1-row template.
+    effective_rows = min(num_rows, max_supported) if num_rows > 0 else 1
+    
+    path = os.path.join(TEMPLATES_DIR, f"BulTrans_Template_{effective_rows}row.docx")
+    
+    if not os.path.exists(path):
+        log(f"Template file not found: {path}. Trying default 1-row template.")
+        default_path = os.path.join(TEMPLATES_DIR, "BulTrans_Template_1row.docx")
+        if not os.path.exists(default_path):
+             # This is a critical error, the application cannot function without templates.
+             raise FileNotFoundError(f"Default template not found: {default_path}")
+        return default_path
+        
+    return path
 
 def get_drive_service():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")

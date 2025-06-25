@@ -225,7 +225,7 @@ def extract_invoice_date(text):
 # PYTEST FIX 2: Moved city translation logic back into this function to satisfy the unit test.
 
 # FIX 1: Major improvement to customer details extraction
-def extract_customer_details(text, supplier_name_to_clean, translated_supplier_name_to_clean=""):
+def extract_customer_details(text, supplier_name, translated_supplier_name=""):
     details = { 'name': '', 'vat': '', 'id': '', 'address': '', 'city': '' }
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     
@@ -240,14 +240,14 @@ def extract_customer_details(text, supplier_name_to_clean, translated_supplier_n
             raw_name = line.split(':', 1)[-1].strip()
             cleaned_name = raw_name
 
-            # Step 2: Dual-language cleaning
-            # First, clean the primary supplier name (from Excel)
-            if supplier_name_to_clean:
-                cleaned_name = re.sub(re.escape(supplier_name_to_clean.strip()), '', cleaned_name, flags=re.IGNORECASE)
+            # Step 2: Dual-language cleaning using the new parameter names
+            # First, clean the primary supplier name
+            if supplier_name:
+                cleaned_name = re.sub(re.escape(supplier_name.strip()), '', cleaned_name, flags=re.IGNORECASE)
 
             # Second, clean the translated version of the supplier name
-            if translated_supplier_name_to_clean:
-                cleaned_name = re.sub(re.escape(translated_supplier_name_to_clean.strip()), '', cleaned_name, flags=re.IGNORECASE)
+            if translated_supplier_name:
+                cleaned_name = re.sub(re.escape(translated_supplier_name.strip()), '', cleaned_name, flags=re.IGNORECASE)
 
             # Third, clean generic keywords
             cleaned_name = re.sub(r'(?i)\b(supplier|vendor|company|firm|customer|client|bill to)\b|:', '', cleaned_name)
@@ -432,12 +432,16 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             processing_errors.append(f"Warning: Found {len(service_items)} service lines. Only the first 5 will be included.")
         log(f"Extracted and validated {len(service_items)} service lines.")
 
-                # Get both original and translated supplier names
+        # Get both original and translated supplier names
         supplier_name_original = supplier_data["SupplierName"]
         supplier_name_translated = auto_translate(supplier_name_original) if supplier_name_original != auto_translate(supplier_name_original) else ""
         
-        # Pass both versions for cleaning
-        customer_details = extract_customer_details(text, supplier_name_original, supplier_name_translated)
+        # Pass both versions for cleaning using keyword arguments
+        customer_details = extract_customer_details(
+            text,
+            supplier_name=supplier_name_original,
+            translated_supplier_name=supplier_name_translated
+        )
         log(f"Extracted Customer Details: {customer_details}")
         
         currency_map = {"€": "EUR", "$": "USD", "£": "GBP", "euro": "EUR", "usd": "USD"}

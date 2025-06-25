@@ -86,7 +86,7 @@ def number_to_bulgarian_words(amount):
                     ones_word = word_map.get(n % 10, "")
                     parts.append(f"{tens_word}{' и ' + ones_word if ones_word else ''}")
             return " ".join(parts)
-        leva_words = convert(leva).capitalize()
+        leva_words = convert(leva)
         return f"{leva_words} лева и {stotinki:02d} стотинки"
     except Exception as e:
         log(f"Error in number_to_bulgarian_words: {e}")
@@ -176,7 +176,6 @@ def extract_recipient_details(text: str, supplier_data: pd.Series) -> dict:
                         if not details['id'] and any(kw in sub_line_lower for kw in ['eik', 'id no']):
                             id_match = re.search(r'\d{9,}', sub_line)
                             if id_match: details['id'] = id_match.group(0)
-                    details['name'] = re.sub(r'(?i)\b(ltd|gmbh|еоод|оод)\b', '', details['name']).strip()
                     log(f"Method 1 extracted: {details}")
                     return details
 

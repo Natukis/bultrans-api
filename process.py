@@ -346,6 +346,7 @@ def extract_service_lines(text):
     return service_items
 
 
+
 def get_template_path_by_rows(num_rows: int) -> str:
     max_supported = 5
     effective_rows = min(num_rows, max_supported) if num_rows > 0 else 1

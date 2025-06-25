@@ -218,39 +218,50 @@ def extract_customer_details(text, supplier_name=""):
     details = {'name': '', 'vat': '', 'id': '', 'address': '', 'city': ''}
     lines = text.splitlines()
     id_keywords = ["id no", "uic", "company no", "tax id"]
+
     for line in lines:
-        line_lower = line.lower()
-        # שם הלקוח
-        if not details['name'] and any(keyword in line_lower for keyword in ['customer name:', 'bill to:', 'invoice to:']):
-            raw_name = line.split(':', 1)[-1].strip()
+        lower = line.lower()
+
+        # שם הלקוח (Customer Name / Bill To / Invoice To)
+        if not details['name'] and any(k in lower for k in ['customer name:', 'bill to:', 'invoice to:']):
+            raw = line.split(':', 1)[1].strip()
+            # יש בשורה גם Supplier:...
+            parts = re.split(r'\s+Supplier[:\s]', raw, flags=re.IGNORECASE)
+            name_part = parts[0].strip()
+            # הורדת שם הספק אם נדבק
             if supplier_name:
-                raw_name = re.sub(re.escape(supplier_name), '', raw_name, flags=re.IGNORECASE)
-            details['name'] = re.sub(r'(?i)\bsupplier\b|:', '', raw_name).strip()
-        # VAT
-        if not details['vat'] and "vat" in line_lower:
-            vat_match = re.search(r'(BG\d+)', line, re.IGNORECASE)
-            if vat_match:
-                details['vat'] = vat_match.group(1).strip()
-        # מספר חברה/ח.פ
-        if not details['id'] and any(keyword in line_lower for keyword in id_keywords):
-            id_match = re.search(r'\b(\d{7,15})\b', line)
-            if id_match:
-                details['id'] = id_match.group(0).strip()
-        # כתובת
-        if not details['address'] and "address:" in line_lower:
-            details['address'] = line.split(':', 1)[-1].strip()
-        # עיר
-        if not details['city'] and "city:" in line_lower:
-            city_raw = line.split(':', 1)[-1].strip()
-            # אם יש API תתרגם, אחרת תשאיר
+                name_part = re.sub(re.escape(supplier_name), '', name_part, flags=re.IGNORECASE)
+            details['name'] = name_part
+
+        # VAT No
+        if not details['vat'] and 'vat' in lower:
+            m = re.search(r'\bBG\d+\b', line, re.IGNORECASE)
+            if m:
+                details['vat'] = m.group(0)
+
+        # ID No
+        if not details['id'] and any(k in lower for k in id_keywords):
+            m = re.search(r'\b(\d{7,15})\b', line)
+            if m:
+                details['id'] = m.group(1)
+
+        # Address
+        if not details['address'] and 'address:' in lower:
+            details['address'] = line.split(':', 1)[1].strip()
+
+        # City
+        if not details['city'] and 'city:' in lower:
+            city_raw = line.split(':', 1)[1].strip()
+            # אם יש API מתרגם, אחרת משאיר
             if os.getenv("GOOGLE_API_KEY"):
                 try:
-                    city_trans = auto_translate(city_raw, target_lang="bg")
-                    details['city'] = city_trans if city_trans else city_raw
-                except Exception:
+                    tr = auto_translate(city_raw, target_lang="bg")
+                    details['city'] = tr if tr else city_raw
+                except:
                     details['city'] = city_raw
             else:
                 details['city'] = city_raw
+
     return details
 
 def extract_service_date(text_block):

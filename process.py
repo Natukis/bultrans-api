@@ -225,72 +225,99 @@ def extract_invoice_date(text):
 # PYTEST FIX 2: Moved city translation logic back into this function to satisfy the unit test.
 
 # FIX 1: Major improvement to customer details extraction
-def extract_customer_details(text, supplier_name, translated_supplier_name=""):
+def find_and_extract_recipient_details(text: str, supplier_data: pd.Series) -> dict:
+    """
+    Finds recipient details by first identifying and isolating the supplier's text block,
+    then searching for the recipient's details robustly, handling same-line and next-line cases.
+    """
+    log("Starting V3 of Block Isolation method to find recipient...")
     details = { 'name': '', 'vat': '', 'id': '', 'address': '', 'city': '' }
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    lines = [line for line in text.splitlines() if line.strip()]
+    supplier_vat = str(supplier_data.get("SupplierCompanyVAT", ""))
+
+    # --- Step 1: Locate the Supplier Zone to avoid it later ---
+    supplier_zone_indices = set()
+    if supplier_vat:
+        for i, line in enumerate(lines):
+            if supplier_vat in line:
+                # Mark a zone of 4 lines before and 5 lines after as the supplier zone
+                for j in range(max(0, i - 4), min(len(lines), i + 6)):
+                    supplier_zone_indices.add(j)
+                log(f"Identified supplier zone around line {i} based on VAT {supplier_vat}")
+                break
     
-    recipient_block_start = -1
+    # --- Step 2: Find the Recipient Keyword, AVOIDING the supplier zone ---
+    recipient_keyword_line_index = -1
+    found_keyword = ""
+    customer_keywords = ['customer name', 'bill to', 'invoice to', 'invoice for', 'client', 'получател']
     
-    # Step 1: Find the start of the recipient block
     for i, line in enumerate(lines):
+        if i in supplier_zone_indices:
+            continue
+
         line_lower = line.lower()
-        if any(k in line_lower for k in ['customer name:', 'bill to:', 'invoice to:', 'client:']):
-            recipient_block_start = i
-            
-            raw_name = line.split(':', 1)[-1].strip()
-            cleaned_name = raw_name
-
-            # Step 2: Dual-language cleaning using the new parameter names
-            # First, clean the primary supplier name
-            if supplier_name:
-                cleaned_name = re.sub(re.escape(supplier_name.strip()), '', cleaned_name, flags=re.IGNORECASE)
-
-            # Second, clean the translated version of the supplier name
-            if translated_supplier_name:
-                cleaned_name = re.sub(re.escape(translated_supplier_name.strip()), '', cleaned_name, flags=re.IGNORECASE)
-
-            # Third, clean generic keywords
-            cleaned_name = re.sub(r'(?i)\b(supplier|vendor|company|firm|customer|client|bill to)\b|:', '', cleaned_name)
-            
-            if len(cleaned_name.strip()) > 2:
-                details['name'] = ' '.join(cleaned_name.strip().split())
-
+        for keyword in customer_keywords:
+            # Check if the line starts with or contains the keyword for higher accuracy
+            if line_lower.strip().startswith(keyword) or f": {keyword}" in line_lower:
+                recipient_keyword_line_index = i
+                found_keyword = keyword
+                log(f"Found recipient keyword '{found_keyword}' in line: '{line}'")
+                break
+        if recipient_keyword_line_index != -1:
             break
-
-    # Step 3: Fallback for name on the next line
-    if not details['name'] and recipient_block_start != -1 and recipient_block_start + 1 < len(lines):
-        next_line = lines[recipient_block_start + 1]
-        if not any(k in next_line.lower() for k in ['address', 'vat', 'eik', 'ул.', 'бул.']):
-             details['name'] = next_line
-    
-    # Step 4: Search for other details within the identified block
-    if recipient_block_start != -1:
-        search_lines = lines[recipient_block_start + 1 : recipient_block_start + 6]
-        for line in search_lines:
-            line_lower = line.lower()
             
-            if not details['address'] and ('address' in line_lower or 'ул.' in line_lower or 'бул.' in line_lower):
+    # --- Step 3: Robustly Extract Name from the located recipient block ---
+    if recipient_keyword_line_index != -1:
+        keyword_line_text = lines[recipient_keyword_line_index]
+        
+        # Try to find the name on the SAME line as the keyword.
+        # Split after the keyword itself and remove leading colons/spaces
+        potential_name_on_line = re.split(found_keyword, keyword_line_text, flags=re.IGNORECASE)[-1]
+        potential_name_on_line = potential_name_on_line.lstrip(' :').strip()
+
+        # Heuristic: Is it a plausible name? (Not empty, not just digits)
+        if len(potential_name_on_line) > 2 and not potential_name_on_line.isdigit():
+            details['name'] = potential_name_on_line
+            log(f"Extracted name from same line: '{details['name']}'")
+        else:
+            # Case B: Name is likely on the NEXT line.
+            if recipient_keyword_line_index + 1 < len(lines):
+                next_line_text = lines[recipient_keyword_line_index + 1]
+                
+                # Heuristic: The name line shouldn't look like an address or ID line.
+                is_address = any(addr_kw in next_line_text.lower() for addr_kw in ['address', 'ул.', 'бул.', 'str.'])
+                is_vat_or_id = any(id_kw in next_line_text.lower() for id_kw in ['vat', 'eik', 'id'])
+                
+                if not is_address and not is_vat_or_id:
+                    details['name'] = next_line_text.strip()
+                    log(f"Extracted name from next line: '{details['name']}'")
+
+        # --- Extract other details from the surrounding lines ---
+        start_search_index = recipient_keyword_line_index + 1
+        for i in range(start_search_index, min(len(lines), start_search_index + 6)):
+            line = lines[i]
+            # Don't re-parse the name line as an address
+            if line.strip() == details['name']:
+                continue
+
+            line_lower = line.lower()
+            if not details['address'] and any(kw in line_lower for kw in ['address', 'ул.', 'бул.', 'str.']):
                 details['address'] = line.split(':', 1)[-1].strip()
+            
+            # Find ANY VAT number now, BG or otherwise, that is not the supplier's
+            if not details['vat']:
+                m = re.search(r'\b([A-Z]{2}\s?[0-9\s-]{8,13})\b', line)
+                if m and (not supplier_vat or supplier_vat not in m.group(1)): 
+                     details['vat'] = m.group(1).strip()
+            
+            if not details['id'] and any(kw in line_lower for kw in ['id:', 'eik:', 'id no.']):
+                 details['id'] = line.split(':', 1)[-1].strip()
+    else:
+        log("Could not find a recipient keyword. Recipient details might be missing.")
 
-            if not details['city'] and 'city' in line_lower:
-                details['city'] = line.split(':', 1)[-1].strip()
-
-            if not details['vat'] and 'vat' in line_lower:
-                m = re.search(r'(BG\d+)', line, re.IGNORECASE)
-                if m: details['vat'] = m.group(1)
-
-            if not details['id'] and any(k in line_lower for k in ["id no", "uic", "eik"]):
-                m = re.search(r'\b(\d{9,15})\b', line)
-                if m: details['id'] = m.group(1)
-
-    # Step 5: Translate city
-    if details['city']:
-        details['city'] = auto_translate(details['city'])
-
-    # Step 6: Final cleanup
-    for key, val in details.items():
-        if isinstance(val, str):
-            details[key] = val.strip()
+    # Final cleanup of the extracted name
+    details['name'] = re.sub(r'(?i)\b(supplier|vendor|company|ltd|gmbh)\b', '', details['name'], flags=re.IGNORECASE).strip()
+    details['name'] = ' '.join(details['name'].split()) # Normalize spaces
 
     return details
 

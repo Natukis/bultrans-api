@@ -223,35 +223,42 @@ def extract_invoice_date(text):
     
 def find_and_extract_recipient_details(text: str, supplier_data: pd.Series) -> dict:
     """
-    Finds recipient details by splitting the document into blocks, identifying the supplier's block,
-    and then searching for the recipient's details in the other blocks.
+    Finds recipient details using a primary keyword search and a secondary fallback search
+    based on non-supplier identifiers (VAT/ID). Includes extensive logging for debugging.
     """
-    log("Starting Block-based method (V4) to find recipient...")
+    log("--- Starting Recipient Details Extraction (V5) ---")
     details = { 'name': '', 'vat': '', 'id': '', 'address': '', 'city': '' }
     supplier_vat = str(supplier_data.get("SupplierCompanyVAT", ""))
 
-    # --- Step 1: Split text into blocks based on empty lines ---
+    # --- Step 1: Split text into blocks and LOG them (as you requested) ---
     blocks = text.split('\n\n')
-    
-    # --- Step 2: Identify the supplier's block and separate other blocks ---
-    supplier_block = ""
+    log("--- Analyzing Document Blocks ---")
+    for idx, block in enumerate(blocks):
+        # Sanitize block for logging to prevent log injection/formatting issues
+        sanitized_block = block.replace('\n', ' ').replace('\r', '')
+        log(f"BLOCK {idx}: \"{sanitized_block}\"")
+    log("--- End of Document Blocks ---")
+
+    # --- Step 2: Identify and separate the supplier's block ---
+    supplier_block_found = False
     other_blocks = []
     for block in blocks:
         if supplier_vat and supplier_vat in block:
-            supplier_block = block
+            supplier_block_found = True
         else:
             other_blocks.append(block)
             
-    if supplier_block:
-        log(f"Identified supplier block containing VAT {supplier_vat}")
+    if supplier_block_found:
+        log(f"Identified and isolated supplier block containing VAT {supplier_vat}")
     else:
         log("Warning: Could not definitively identify supplier block by VAT.")
 
-    # --- Step 3: Find the Recipient Keyword in the other blocks ---
+    # --- Step 3: Primary Search - Find the Recipient using Keywords ---
     recipient_block = ""
-    recipient_keyword_line_index = -1
-    found_keyword = ""
-    customer_keywords = ['customer name', 'bill to', 'invoice to', 'invoice for', 'client', 'получател']
+    customer_keywords = [
+        'customer name', 'bill to', 'invoice to', 'invoice for', 'client', 'customer', 'recipient', # English variations
+        'получател', 'клиент' # Bulgarian variations
+    ]
     
     for block in other_blocks:
         lines_in_block = block.strip().split('\n')
@@ -260,35 +267,36 @@ def find_and_extract_recipient_details(text: str, supplier_data: pd.Series) -> d
             for keyword in customer_keywords:
                 if keyword in line_lower:
                     recipient_block = block
-                    recipient_keyword_line_index = i
-                    found_keyword = keyword
-                    log(f"Found recipient keyword '{found_keyword}' in block:\n{recipient_block}")
+                    log(f"SUCCESS (Primary Search): Found keyword '{keyword}' in block {other_blocks.index(block)}.")
                     break
-            if recipient_block:
-                break
-        if recipient_block:
-            break
+            if recipient_block: break
+        if recipient_block: break
 
-    # --- Step 4: Extract details from the located recipient block ---
+    # --- Step 4: Fallback Search - If no keyword found, search by non-supplier VAT/ID ---
+    if not recipient_block:
+        log("Primary keyword search failed. Starting Fallback Search for non-supplier identifiers...")
+        for block in other_blocks:
+            # Search for any VAT number that is not the supplier's
+            vat_matches = re.findall(r'\b([A-Z]{2}\s?[0-9\s-]{8,13})\b', block)
+            found_non_supplier_vat = False
+            for vat in vat_matches:
+                if vat != supplier_vat:
+                    recipient_block = block
+                    log(f"SUCCESS (Fallback Search): Found non-supplier VAT '{vat}' in block {other_blocks.index(block)}.")
+                    found_non_supplier_vat = True
+                    break
+            if found_non_supplier_vat:
+                break
+    
+    # --- Step 5: Extract details from the located recipient block (if found) ---
     if recipient_block:
         lines_in_recipient_block = recipient_block.strip().split('\n')
-        keyword_line_text = lines_in_recipient_block[recipient_keyword_line_index]
-
-        # Try to find the name on the SAME line as the keyword
-        potential_name_on_line = re.split(found_keyword, keyword_line_text, flags=re.IGNORECASE)[-1]
-        potential_name_on_line = potential_name_on_line.lstrip(' :').strip()
-
-        if len(potential_name_on_line) > 2 and not potential_name_on_line.isdigit():
-            details['name'] = potential_name_on_line
-        else:
-            # If not on the same line, it's likely on the NEXT line
-            if recipient_keyword_line_index + 1 < len(lines_in_recipient_block):
-                details['name'] = lines_in_recipient_block[recipient_keyword_line_index + 1].strip()
-
-        # Extract other details from the same block
+        # The name is most likely the first line of the block
+        details['name'] = lines_in_recipient_block[0].strip()
+        
         for line in lines_in_recipient_block:
             line_lower = line.lower()
-            if not details['address'] and any(kw in line_lower for kw in ['address:', 'ул.', 'бул.', 'str.']):
+            if not details['address'] and any(kw in line_lower for kw in ['address', 'ул.', 'бул.', 'str.']):
                 details['address'] = line.split(':', 1)[-1].strip()
             
             if not details['vat']:
@@ -299,10 +307,14 @@ def find_and_extract_recipient_details(text: str, supplier_data: pd.Series) -> d
             if not details['id'] and any(kw in line_lower for kw in ['id:', 'eik:', 'id no']):
                 details['id'] = line.split(':', 1)[-1].strip()
     else:
-        log("Could not find a recipient keyword in any non-supplier block.")
+        # --- Step 6: Improved Failure Logging (as you requested) ---
+        log("--- RECIPIENT SEARCH FAILED ---")
+        log("Primary keyword search and Fallback search both failed to identify a recipient block.")
+        log(f"Keywords Searched: {customer_keywords}")
+        log("RECOMMENDATION: Review the logged 'BLOCKS' above to see the raw text and determine the correct pattern or keyword for the recipient.")
 
     # Final cleanup
-    details['name'] = re.sub(r'(?i)\b(supplier|vendor|company|client|customer|bill to)\b', '', details['name'], flags=re.IGNORECASE).strip()
+    details['name'] = re.sub(r'(?i)\b(supplier|vendor|company|ltd|gmbh|client|customer|bill to)\b', '', details['name'], flags=re.IGNORECASE).strip(' :').strip()
     details['name'] = ' '.join(details['name'].split())
 
     return details

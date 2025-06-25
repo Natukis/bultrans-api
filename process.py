@@ -298,6 +298,32 @@ def find_and_extract_recipient_details(text: str, supplier_data: pd.Series) -> d
     details['name'] = ' '.join(details['name'].split())
 
     return details
+def extract_service_date(text_block):
+    bg_months = {1: "Януари", 2: "Февруари", 3: "Март", 4: "Април", 5: "Май", 6: "Юни", 7: "Юли", 8: "Август", 9: "Септември", 10: "Октомври", 11: "Ноември", 12: "Декември"}
+    
+    # Priority for full month name
+    match1 = re.search(r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b', text_block, re.IGNORECASE)
+    if match1:
+        month_name_en, year = match1.group(1), match1.group(2)
+        try:
+            month_dt = datetime.datetime.strptime(month_name_en, "%B")
+            return f"м.{bg_months[month_dt.month]} {year}"
+        except ValueError:
+            pass
+
+    # Fallback for numeric date
+    match2 = re.search(r'\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b', text_block)
+    if match2:
+        try:
+            parts = re.split(r'[./-]', match2.group(1))
+            if len(parts) == 3:
+                day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                if year < 100: year += 2000
+                return f"м.{bg_months[month]} {year}"
+        except:
+            pass
+            
+    return ""    
 
 def extract_service_lines(text):
     service_items = []

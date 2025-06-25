@@ -380,7 +380,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         if supplier_row.empty: raise HTTPException(status_code=404, detail=f"Supplier with ID '{supplier_id}' not found in suppliers.xlsx")
         supplier_data = supplier_row.iloc[0]
         
-        required_supplier_fields = ["SupplierName", "SupplierCompanyVAT", "IBAN", "BankName"]
+        required_supplier_fields = ["SupplierName", "SupplierCompanyVAT", "IBAN", "Bankname"]
         for field in required_supplier_fields:
             if pd.isna(supplier_data.get(field)) or not str(supplier_data.get(field) or '').strip():
                  raise HTTPException(status_code=400, detail=f"Critical: Supplier field '{field}' is missing in Excel for the given ID.")
@@ -477,7 +477,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             "SupplierAddress": auto_translate(str(supplier_data["SupplierAddress"])),
             "SupplierCity": auto_translate(str(supplier_data["SupplierCity"])),
             "SupplierContactPerson": str(supplier_data["SupplierContactPerson"]),
-            "IBAN": str(supplier_data["IBAN"]), "BankName": auto_translate(str(supplier_data["BankName"])), "BankCode": str(supplier_data["BankCode"]),
+            "IBAN": str(supplier_data["IBAN"]), "Bankname": auto_translate(str(supplier_data["Bankname"])), "BankCode": str(supplier_data["BankCode"]),
             "AmountBGN": format_bgn(base_bgn),
             "VATAmount": format_bgn(vat_bgn),
             "vat_percent": int(vat_percent),

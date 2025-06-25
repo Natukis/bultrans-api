@@ -220,100 +220,90 @@ def extract_invoice_date(text):
                     return dt.strftime("%d.%m.%Y"), dt
                 except ValueError: continue
     return None, None
-
+    
 def find_and_extract_recipient_details(text: str, supplier_data: pd.Series) -> dict:
     """
-    Finds recipient details by first identifying and isolating the supplier's text block,
-    then searching for the recipient's details robustly, handling same-line and next-line cases.
+    Finds recipient details by splitting the document into blocks, identifying the supplier's block,
+    and then searching for the recipient's details in the other blocks.
     """
-    log("Starting Block Isolation method to find recipient...")
+    log("Starting Block-based method (V4) to find recipient...")
     details = { 'name': '', 'vat': '', 'id': '', 'address': '', 'city': '' }
-    lines = [line for line in text.splitlines() if line.strip()]
     supplier_vat = str(supplier_data.get("SupplierCompanyVAT", ""))
 
-    # --- Step 1: Locate the Supplier Zone to avoid it later ---
-    supplier_zone_indices = set()
-    if supplier_vat:
-        for i, line in enumerate(lines):
-            if supplier_vat in line:
-                # Mark a zone of 4 lines before and 5 lines after as the supplier zone
-                for j in range(max(0, i - 4), min(len(lines), i + 6)):
-                    supplier_zone_indices.add(j)
-                log(f"Identified supplier zone around line {i} based on VAT {supplier_vat}")
-                break
+    # --- Step 1: Split text into blocks based on empty lines ---
+    blocks = text.split('\n\n')
     
-    # --- Step 2: Find the Recipient Keyword, AVOIDING the supplier zone ---
+    # --- Step 2: Identify the supplier's block and separate other blocks ---
+    supplier_block = ""
+    other_blocks = []
+    for block in blocks:
+        if supplier_vat and supplier_vat in block:
+            supplier_block = block
+        else:
+            other_blocks.append(block)
+            
+    if supplier_block:
+        log(f"Identified supplier block containing VAT {supplier_vat}")
+    else:
+        log("Warning: Could not definitively identify supplier block by VAT.")
+
+    # --- Step 3: Find the Recipient Keyword in the other blocks ---
+    recipient_block = ""
     recipient_keyword_line_index = -1
     found_keyword = ""
     customer_keywords = ['customer name', 'bill to', 'invoice to', 'invoice for', 'client', 'получател']
     
-    for i, line in enumerate(lines):
-        if i in supplier_zone_indices:
-            continue
-
-        line_lower = line.lower()
-        for keyword in customer_keywords:
-            # Check if the line starts with or contains the keyword for higher accuracy
-            if line_lower.strip().startswith(keyword) or f": {keyword}" in line_lower:
-                recipient_keyword_line_index = i
-                found_keyword = keyword
-                log(f"Found recipient keyword '{found_keyword}' in line: '{line}'")
+    for block in other_blocks:
+        lines_in_block = block.strip().split('\n')
+        for i, line in enumerate(lines_in_block):
+            line_lower = line.lower()
+            for keyword in customer_keywords:
+                if keyword in line_lower:
+                    recipient_block = block
+                    recipient_keyword_line_index = i
+                    found_keyword = keyword
+                    log(f"Found recipient keyword '{found_keyword}' in block:\n{recipient_block}")
+                    break
+            if recipient_block:
                 break
-        if recipient_keyword_line_index != -1:
+        if recipient_block:
             break
-            
-    # --- Step 3: Robustly Extract Name from the located recipient block ---
-    if recipient_keyword_line_index != -1:
-        keyword_line_text = lines[recipient_keyword_line_index]
-        
-        # Try to find the name on the SAME line as the keyword.
-        # Split after the keyword itself and remove leading colons/spaces
+
+    # --- Step 4: Extract details from the located recipient block ---
+    if recipient_block:
+        lines_in_recipient_block = recipient_block.strip().split('\n')
+        keyword_line_text = lines_in_recipient_block[recipient_keyword_line_index]
+
+        # Try to find the name on the SAME line as the keyword
         potential_name_on_line = re.split(found_keyword, keyword_line_text, flags=re.IGNORECASE)[-1]
         potential_name_on_line = potential_name_on_line.lstrip(' :').strip()
 
-        # Heuristic: Is it a plausible name? (Not empty, not just digits)
         if len(potential_name_on_line) > 2 and not potential_name_on_line.isdigit():
             details['name'] = potential_name_on_line
-            log(f"Extracted name from same line: '{details['name']}'")
         else:
-            # Case B: Name is likely on the NEXT line.
-            if recipient_keyword_line_index + 1 < len(lines):
-                next_line_text = lines[recipient_keyword_line_index + 1]
-                
-                # Heuristic: The name line shouldn't look like an address or ID line.
-                is_address = any(addr_kw in next_line_text.lower() for addr_kw in ['address', 'ул.', 'бул.', 'str.'])
-                is_vat_or_id = any(id_kw in next_line_text.lower() for id_kw in ['vat', 'eik', 'id'])
-                
-                if not is_address and not is_vat_or_id:
-                    details['name'] = next_line_text.strip()
-                    log(f"Extracted name from next line: '{details['name']}'")
+            # If not on the same line, it's likely on the NEXT line
+            if recipient_keyword_line_index + 1 < len(lines_in_recipient_block):
+                details['name'] = lines_in_recipient_block[recipient_keyword_line_index + 1].strip()
 
-        # --- Extract other details from the surrounding lines ---
-        start_search_index = recipient_keyword_line_index + 1
-        for i in range(start_search_index, min(len(lines), start_search_index + 6)):
-            line = lines[i]
-            # Don't re-parse the name line as an address
-            if line.strip() == details['name']:
-                continue
-
+        # Extract other details from the same block
+        for line in lines_in_recipient_block:
             line_lower = line.lower()
-            if not details['address'] and any(kw in line_lower for kw in ['address', 'ул.', 'бул.', 'str.']):
+            if not details['address'] and any(kw in line_lower for kw in ['address:', 'ул.', 'бул.', 'str.']):
                 details['address'] = line.split(':', 1)[-1].strip()
             
-            # Find ANY VAT number now, BG or otherwise, that is not the supplier's
             if not details['vat']:
                 m = re.search(r'\b([A-Z]{2}\s?[0-9\s-]{8,13})\b', line)
-                if m and (not supplier_vat or supplier_vat not in m.group(1)): 
-                     details['vat'] = m.group(1).strip()
+                if m and (not supplier_vat or supplier_vat not in m.group(1)):
+                    details['vat'] = m.group(1).strip()
             
-            if not details['id'] and any(kw in line_lower for kw in ['id:', 'eik:', 'id no.']):
-                 details['id'] = line.split(':', 1)[-1].strip()
+            if not details['id'] and any(kw in line_lower for kw in ['id:', 'eik:', 'id no']):
+                details['id'] = line.split(':', 1)[-1].strip()
     else:
-        log("Could not find a recipient keyword. Recipient details might be missing.")
+        log("Could not find a recipient keyword in any non-supplier block.")
 
-    # Final cleanup of the extracted name
+    # Final cleanup
     details['name'] = re.sub(r'(?i)\b(supplier|vendor|company|ltd|gmbh)\b', '', details['name'], flags=re.IGNORECASE).strip()
-    details['name'] = ' '.join(details['name'].split()) # Normalize spaces
+    details['name'] = ' '.join(details['name'].split())
 
     return details
 

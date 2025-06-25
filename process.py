@@ -459,16 +459,8 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
             processing_errors.append(f"Warning: Found {len(service_items)} service lines. Only the first 5 will be included.")
         log(f"Extracted and validated {len(service_items)} service lines.")
 
-        # Get both original and translated supplier names
-        supplier_name_original = supplier_data["SupplierName"]
-        supplier_name_translated = auto_translate(supplier_name_original) if supplier_name_original != auto_translate(supplier_name_original) else ""
-        
-        # Pass both versions for cleaning using keyword arguments
-        customer_details = extract_customer_details(
-            text,
-            supplier_name=supplier_name_original,
-            translated_supplier_name=supplier_name_translated
-        )
+        # Use the new, robust Block Isolation method
+        customer_details = find_and_extract_recipient_details(text, supplier_data)
         log(f"Extracted Customer Details: {customer_details}")
         
         currency_map = {"€": "EUR", "$": "USD", "£": "GBP", "euro": "EUR", "usd": "USD"}

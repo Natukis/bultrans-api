@@ -141,6 +141,15 @@ def extract_invoice_date(text):
     return None
 
 def extract_service_lines(text):
+    currency_pattern = r"\b(EUR|USD|BGN|ILS|GBP|JPY|CHF|CAD|AUD|₪)\b"
+    currencies_found = set(re.findall(currency_pattern, text))
+    log(f"Detected currencies in text: {currencies_found}")
+    default_currency = "EUR"
+    if "₪" in currencies_found:
+        default_currency = "ILS"
+    elif currencies_found:
+        default_currency = list(currencies_found)[0]  # קח את הראשון שמצאת
+
     """
     מחזירה רשימה של שורות שירות בפורמט:
     [{'description': ..., 'quantity': ..., 'unit_price': ..., 'line_total': ..., 'currency': ..., 'service_date': None}]
@@ -150,7 +159,7 @@ def extract_service_lines(text):
 
     for line in lines:
         # ניסיון מלא
-        m = re.search(r"(.+?)\s+(\d+)\s+(EUR|USD)\s*([\d,.]+)\s+(EUR|USD)\s*([\d,.]+)", line)
+        m = re.search(r"(.+?)\s+(\d+)\s+(EUR|USD|BGN|ILS|GBP|JPY|CHF|CAD|AUD|₪)\s*([\d,.]+)\s+(EUR|USD|BGN|ILS|GBP|JPY|CHF|CAD|AUD|₪)\s*([\d,.]+)", line)
         if m:
             desc = m.group(1).strip()
             qty = int(m.group(2))
@@ -185,7 +194,7 @@ def extract_service_lines(text):
                 "quantity": 1,
                 "unit_price": line_total,
                 "line_total": line_total,
-                "currency": "EUR",
+                "currency": default_currency,
                 "service_date": None
             })
 

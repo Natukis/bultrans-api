@@ -149,7 +149,7 @@ def extract_service_lines(text):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
 
     for line in lines:
-        # זיהוי שורה עם תיאור + כמות + מחיר יחידה + סכום כולל
+        # ניסיון מלא
         m = re.search(r"(.+?)\s+(\d+)\s+(EUR|USD)\s*([\d,.]+)\s+(EUR|USD)\s*([\d,.]+)", line)
         if m:
             desc = m.group(1).strip()
@@ -165,6 +165,22 @@ def extract_service_lines(text):
                 "currency": currency,
                 "service_date": None
             })
+            continue
+    
+        # ניסיון מינימלי
+        m_simple = re.search(r"(.+?)\s+([\d,.]+)$", line)
+        if m_simple:
+            desc = m_simple.group(1).strip()
+            line_total = float(m_simple.group(2).replace(",", "").replace(" ", ""))
+            service_items.append({
+                "description": desc,
+                "quantity": 1,
+                "unit_price": line_total,
+                "line_total": line_total,
+                "currency": "EUR",
+                "service_date": None
+            })
+
 
     if not service_items:
         log("No service lines detected.")

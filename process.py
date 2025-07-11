@@ -289,50 +289,20 @@ def upload_to_drive(local_path, filename):
     return link
 
 # --- Main API Endpoint ---
-def get_bnb_exchange_rate(date_obj):
+def get_exchange_rate_for_date(date_obj, currency):
     """
-    מחזיר את שער ההמרה BNB ל־BGN עבור EUR בתאריך הנתון.
-    אם אין שער מדויק — מחפש קדימה/אחורה, ואם גם אז לא — לוקח את השער הכי עדכני באתר.
+    מחזיר את שער ההמרה ל‑BGN עבור מטבע נתון בתאריך נתון, דרך exchangerate.host.
     """
-    max_days = 10  # כמה ימים קדימה/אחורה לחפש
-
-    # קודם קדימה ואחורה
-    for delta in range(0, max_days + 1):
-        for sign in [1, -1]:
-            check_date = date_obj + datetime.timedelta(days=delta * sign)
-            url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?downloadOper=&group1=first&date={check_date.strftime('%d.%m.%Y')}&search="
-            log(f"Fetching BNB exchange rate for date {check_date.strftime('%d.%m.%Y')}")
-            try:
-                resp = requests.get(url, timeout=10)
-                resp.raise_for_status()
-                html = resp.text
-                m = re.search(r"<td>EUR</td>\s*<td>([\d,.]+)</td>", html)
-                if m:
-                    rate_str = m.group(1).replace(",", ".")
-                    rate = float(rate_str)
-                    log(f"BNB exchange rate for EUR on {check_date.strftime('%d.%m.%Y')}: {rate}")
-                    return rate
-            except Exception as e:
-                log(f"Failed to fetch BNB exchange rate for {check_date.strftime('%d.%m.%Y')}: {e}")
-                continue
-
-    # אם עדיין לא מצאנו — ניקח את השער הכי עדכני
-    url = "https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/index.htm"
-    log("Fetching latest available BNB exchange rate for EUR")
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        html = resp.text
-        m = re.search(r"<td>EUR</td>\s*<td>([\d,.]+)</td>", html)
-        if m:
-            rate_str = m.group(1).replace(",", ".")
-            rate = float(rate_str)
-            log(f"Latest available BNB exchange rate for EUR: {rate}")
-            return rate
-    except Exception as e:
-        log(f"Failed to fetch latest available BNB exchange rate: {e}")
-
-    raise ValueError("Could not find any EUR exchange rate on BNB site.")
+    url = f"https://api.exchangerate.host/{date_obj.strftime('%Y-%m-%d')}?base={currency}&symbols=BGN"
+    log(f"Fetching exchange rate for {currency}→BGN on {date_obj.strftime('%Y-%m-%d')}")
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    if "rates" in data and "BGN" in data["rates"]:
+        rate = float(data["rates"]["BGN"])
+        log(f"Rate for {currency}→BGN on {date_obj.strftime('%Y-%m-%d')}: {rate}")
+        return rate
+    raise ValueError(f"Could not fetch rate for {currency}→BGN on {date_obj.strftime('%Y-%m-%d')}")
 
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
@@ -367,7 +337,8 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         customer_details = extract_recipient_details(text, supplier_data)
         if not customer_details.get('name'): processing_errors.append("Warning: Could not identify recipient details.")
 
-        exchange_rate = get_bnb_exchange_rate(date_obj)
+        currency = service_items[0]["currency"]
+        exchange_rate = get_exchange_rate_for_date(date_obj, currency)
         base_bgn = sum(item['line_total'] for item in service_items) * exchange_rate
         vat_bgn = base_bgn * (DEFAULT_VAT_PERCENT / 100)
         total_bgn = base_bgn + vat_bgn

@@ -167,6 +167,10 @@ def extract_service_lines(text):
             })
             continue
     
+        # דלג על שורות סיכום
+        if re.search(r'(?i)subtotal|total|tax|amount', line):
+            continue
+    
         # ניסיון מינימלי
         m_simple = re.search(r"(.+?)\s+([\d,.]+)$", line)
         if m_simple:
@@ -180,7 +184,6 @@ def extract_service_lines(text):
                 "currency": "EUR",
                 "service_date": None
             })
-
 
     if not service_items:
         log("No service lines detected.")

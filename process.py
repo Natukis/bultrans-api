@@ -171,11 +171,15 @@ def extract_service_lines(text):
         if re.search(r'(?i)subtotal|total|tax|amount', line):
             continue
     
-        # ניסיון מינימלי
         m_simple = re.search(r"(.+?)\s+([\d,.]+)$", line)
         if m_simple:
             desc = m_simple.group(1).strip()
-            line_total = float(m_simple.group(2).replace(",", "").replace(" ", ""))
+            value_str = m_simple.group(2).replace(",", "").replace(" ", "")
+            try:
+                line_total = float(value_str)
+            except ValueError:
+                log(f"Skipping line — value not a valid number: {value_str}")
+                continue
             service_items.append({
                 "description": desc,
                 "quantity": 1,
@@ -184,6 +188,7 @@ def extract_service_lines(text):
                 "currency": "EUR",
                 "service_date": None
             })
+
 
     if not service_items:
         log("No service lines detected.")

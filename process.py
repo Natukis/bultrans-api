@@ -143,44 +143,31 @@ def extract_invoice_date(text):
 def extract_service_lines(text):
     """
     מחזירה רשימה של שורות שירות בפורמט:
-    [{'description': ..., 'line_total': ..., 'service_date': datetime|None}]
+    [{'description': ..., 'quantity': ..., 'unit_price': ..., 'line_total': ..., 'currency': ..., 'service_date': None}]
     """
     service_items = []
     lines = [l.strip() for l in text.splitlines() if l.strip()]
-    header_idx, footer_idx = -1, len(lines)
-    for i, line in enumerate(lines):
-        if re.search(r'(?i)\b(Description|Item|Услуга)\b', line) and len(line) < 50:
-            header_idx = i
-        if re.search(r'(?i)\b(subtotal|total|общо|ддс|vat|tax)\b', line):
-            footer_idx = i
-            break
-    if header_idx != -1:
-        for line in lines[header_idx + 1:footer_idx]:
-            m = re.search(r'([\d\s,]+\.?\d*)$', line)
-            if m and len(line[:m.start()].strip()) > 3:
-                try:
-                    amount_str = m.group(1).replace(" ", "").replace(",", "")
-                    amount = float(amount_str)
-                    desc = line[:m.start()].strip()
 
-                    # חפש תאריך בתוך התיאור
-                    date_match = re.search(r'(\d{2}\.\d{2}\.\d{4})', desc)
-                    service_date = None
-                    if date_match:
-                        try:
-                            service_date = datetime.datetime.strptime(date_match.group(1), "%d.%m.%Y")
-                        except ValueError:
-                            pass
+    for line in lines:
+        # זיהוי שורה עם תיאור + כמות + מחיר יחידה + סכום כולל
+        m = re.search(r"(.+?)\s+(\d+)\s+(EUR|USD)\s*([\d,.]+)\s+(EUR|USD)\s*([\d,.]+)", line)
+        if m:
+            desc = m.group(1).strip()
+            qty = int(m.group(2))
+            currency = m.group(3)
+            unit_price = float(m.group(4).replace(",", "").replace(" ", ""))
+            line_total = float(m.group(6).replace(",", "").replace(" ", ""))
+            service_items.append({
+                "description": desc,
+                "quantity": qty,
+                "unit_price": unit_price,
+                "line_total": line_total,
+                "currency": currency,
+                "service_date": None
+            })
 
-                    service_items.append({
-                        'description': desc,
-                        'line_total': amount,
-                        'service_date': service_date
-                    })
-                except ValueError:
-                    continue
     if not service_items:
-        log("No service table found.")
+        log("No service lines detected.")
     return service_items
 
 def extract_recipient_details(text: str, supplier_data: pd.Series) -> dict:

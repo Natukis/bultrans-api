@@ -141,33 +141,46 @@ def extract_invoice_date(text):
     return None
 
 def extract_service_lines(text):
+    """
+    מחזירה רשימה של שורות שירות בפורמט:
+    [{'description': ..., 'line_total': ..., 'service_date': datetime|None}]
+    """
     service_items = []
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     header_idx, footer_idx = -1, len(lines)
     for i, line in enumerate(lines):
-        if re.search(r'(?i)\b(Description|Item|Услуга)\b', line) and len(line) < 50: header_idx = i
-        if re.search(r'(?i)\b(subtotal|total|общо|ддс|vat|tax)\b', line): footer_idx = i; break
+        if re.search(r'(?i)\b(Description|Item|Услуга)\b', line) and len(line) < 50:
+            header_idx = i
+        if re.search(r'(?i)\b(subtotal|total|общо|ддс|vat|tax)\b', line):
+            footer_idx = i
+            break
     if header_idx != -1:
         for line in lines[header_idx + 1:footer_idx]:
             m = re.search(r'([\d\s,]+\.?\d*)$', line)
             if m and len(line[:m.start()].strip()) > 3:
                 try:
                     amount_str = m.group(1).replace(" ", "").replace(",", "")
-                    service_items.append({'description': line[:m.start()].strip(), 'line_total': float(amount_str)})
-                except ValueError: continue
+                    amount = float(amount_str)
+                    desc = line[:m.start()].strip()
+
+                    # חפש תאריך בתוך התיאור
+                    date_match = re.search(r'(\d{2}\.\d{2}\.\d{4})', desc)
+                    service_date = None
+                    if date_match:
+                        try:
+                            service_date = datetime.datetime.strptime(date_match.group(1), "%d.%m.%Y")
+                        except ValueError:
+                            pass
+
+                    service_items.append({
+                        'description': desc,
+                        'line_total': amount,
+                        'service_date': service_date
+                    })
+                except ValueError:
+                    continue
     if not service_items:
-        log("No service table found, falling back to total amount.")
-        total_amount = 0
-        for line in reversed(lines):
-            if re.search(r'(?i)\b(total|subtotal|amount due|grand total|обща сума)\b', line):
-                match = re.search(r'(\d[\d\s,.]*\d)', line)
-                if match:
-                    try:
-                        total_amount = float(match.group(1).replace(" ", "").replace(",", "."))
-                        if total_amount > 0:
-                            service_items.append({'description': "Услуги по договор", 'line_total': total_amount})
-                            break
-                    except ValueError: continue
+        log("No service table found.")
     return service_items
 
 def extract_recipient_details(text: str, supplier_data: pd.Series) -> dict:
@@ -256,6 +269,28 @@ def upload_to_drive(local_path, filename):
     return link
 
 # --- Main API Endpoint ---
+def get_bnb_exchange_rate(date_obj):
+    """
+    מחזיר את שער ההמרה BNB ל־BGN עבור EUR בתאריך הנתון.
+    """
+    url = f"https://www.bnb.bg/Statistics/StExternalSector/StExchangeRates/StERForeignCurrencies/index.htm?downloadOper=&group1=first&date={date_obj.strftime('%d.%m.%Y')}&search="
+    log(f"Fetching BNB exchange rate for date {date_obj.strftime('%d.%m.%Y')}")
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        html = resp.text
+        m = re.search(r"<td>EUR</td>\s*<td>([\d,.]+)</td>", html)
+        if m:
+            rate_str = m.group(1).replace(",", ".")
+            rate = float(rate_str)
+            log(f"BNB exchange rate for EUR: {rate}")
+            return rate
+        else:
+            raise ValueError("EUR exchange rate not found on BNB site.")
+    except Exception as e:
+        log(f"❌ Failed to fetch BNB exchange rate: {e}")
+        raise
+
 
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
@@ -271,14 +306,26 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         if supplier_row.empty: raise HTTPException(status_code=404, detail=f"Supplier with ID '{supplier_id}' not found.")
         supplier_data = supplier_row.iloc[0]
         log(f"Loaded Supplier Data for: {supplier_data['SupplierName']}")
+        iban = str(supplier_data["IBAN"]).strip()
+        if not iban:
+            raise HTTPException(status_code=400, detail=f"Missing IBAN for supplier {supplier_data['SupplierName']}.")
+        
+        # בדוק אם ה־IBAN מופיע פעמיים בקובץ
+        if df["IBAN"].value_counts().get(iban, 0) > 1:
+            raise HTTPException(status_code=400, detail=f"Duplicate IBAN detected for supplier {supplier_data['SupplierName']}.")
 
         date_obj = extract_invoice_date(text) or datetime.datetime.now()
         service_items = extract_service_lines(text)
-        if not service_items: raise HTTPException(status_code=400, detail="No service lines or total amount found.")
+        max_supported_rows = 5
+        if len(service_items) > max_supported_rows:
+            raise HTTPException(status_code=400, detail=f"Too many service lines ({len(service_items)}) — maximum supported is {max_supported_rows}.")
+
+        if not service_items:     
+            raise HTTPException(status_code=400, detail="No service lines found in the invoice.")
         customer_details = extract_recipient_details(text, supplier_data)
         if not customer_details.get('name'): processing_errors.append("Warning: Could not identify recipient details.")
 
-        exchange_rate = 1.95583 # Hardcoded for EUR
+        exchange_rate = get_bnb_exchange_rate(date_obj)
         base_bgn = sum(item['line_total'] for item in service_items) * exchange_rate
         vat_bgn = base_bgn * (DEFAULT_VAT_PERCENT / 100)
         total_bgn = base_bgn + vat_bgn
@@ -290,12 +337,13 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         
         recipient_name_raw = customer_details.get('name', '')
         if not recipient_name_raw:
-            recipient_name_final = "НЕ Е НАМЕРЕН"
+            raise HTTPException(status_code=400, detail="Recipient name could not be identified.")
         elif is_cyrillic(recipient_name_raw):
             recipient_name_final = recipient_name_raw
         else:
             log(f"Recipient name '{recipient_name_raw}' is in Latin script. Transliterating.")
             recipient_name_final = transliterate_to_bulgarian(recipient_name_raw)
+
 
         row_context = {}
         for idx, item in enumerate(service_items[:5], start=1):

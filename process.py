@@ -293,6 +293,13 @@ def get_exchange_rate_for_date(date_obj, currency):
     """
     מחזיר את שער ההמרה ל‑BGN עבור מטבע נתון בתאריך נתון, דרך exchangerate.host.
     """
+    if currency == "BGN":
+        log("Currency is already BGN — using 1.0")
+        return 1.0
+    if currency == "EUR":
+        log("Using fixed EUR→BGN rate: 1.95583")
+        return 1.95583
+
     url = f"https://api.exchangerate.host/{date_obj.strftime('%Y-%m-%d')}?base={currency}&symbols=BGN"
     log(f"Fetching exchange rate for {currency}→BGN on {date_obj.strftime('%Y-%m-%d')}")
     resp = requests.get(url, timeout=10)

@@ -168,9 +168,9 @@ def extract_service_lines(text):
             continue
     
         # דלג על שורות סיכום
-        if re.search(r'(?i)subtotal|total|tax|amount', line):
+        if re.search(r'(?i)subtotal|total|vat|amount|bgn|eur|grand', line):
             continue
-    
+
         m_simple = re.search(r"(.+?)\s+([\d,.]+)$", line)
         if m_simple:
             desc = m_simple.group(1).strip()

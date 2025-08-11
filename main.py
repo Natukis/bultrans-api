@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from process import process_invoice_upload
+from suppliers_api import router as suppliers_router  # ← חדש
 
 app = FastAPI(title="BulTrans API")
 
@@ -24,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- request_id לכל בקשה (גם בכותרת התגובה) ---
+# --- request_id לכל בקשה ---
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     request.state.request_id = str(uuid.uuid4())
@@ -32,7 +33,7 @@ async def add_request_id(request: Request, call_next):
     response.headers["X-Request-ID"] = request.state.request_id
     return response
 
-# --- מטפלי שגיאות מובנים ואחידים ---
+# --- errors uniform ---
 @app.exception_handler(HTTPException)
 async def http_exc_handler(request: Request, exc: HTTPException):
     return JSONResponse(
@@ -59,7 +60,9 @@ async def unhandled_exc_handler(request: Request, exc: Exception):
         },
     )
 
-# --- Routes ---
+# --- Routers ---
+app.include_router(suppliers_router)  # ← חדש
+
 @app.get("/ping")
 async def ping():
     return {"success": True, "message": "API is alive!"}

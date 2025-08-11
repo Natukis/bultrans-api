@@ -1,14 +1,19 @@
 # ai_endpoint.py
-import os, re, tempfile
+import os
+import re
+import tempfile
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from ai_schema import Invoice, Party, ServiceLine, Totals, run_basic_validation
+
+from ai_schema import Invoice, run_basic_validation
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
-# --- Text extraction helpers ---
+# ---------------------------
+# Text extraction (PDF → text)
+# ---------------------------
 def _extract_text_pypdf2(path: str) -> str:
     try:
         import PyPDF2  # type: ignore
@@ -34,25 +39,28 @@ def extract_text_from_pdf(path: str) -> str:
         text = _extract_text_pdfminer(path)
     return text
 
-# --- Parsers ---
+# ---------------------------
+# Rule-based baseline parser
+# ---------------------------
 DATE_PATTERNS = [
-    r"\b(\d{2}\.\d{2}\.\d{4})\b",      # 31.12.2025
-    r"\b(\d{4}-\d{2}-\d{2})\b",        # 2025-12-31
-    r"\b(\d{2}/\d{2}/\d{4})\b",        # 31/12/2025
+    r"\b(\d{2}\.\d{2}\.\d{4})\b",   # 31.12.2025
+    r"\b(\d{4}-\d{2}-\d{2})\b",     # 2025-12-31
+    r"\b(\d{2}/\d{2}/\d{4})\b",     # 31/12/2025
 ]
 CUR_CODES = ["EUR", "USD", "BGN", "GBP", "RON", "PLN", "HUF", "TRY", "ILS"]
 
 def parse_rule_based(text: str) -> Dict[str, Any]:
-    # Currency
+    # Currency guess
     cur = None
     for c in CUR_CODES:
         if re.search(rf"\b{c}\b", text, re.IGNORECASE):
             cur = c
             break
     if not cur:
+        t = text.lower()
         if "€" in text: cur = "EUR"
         elif "$" in text: cur = "USD"
-        elif "лв" in text.lower(): cur = "BGN"
+        elif "лв" in t or "bgn" in t: cur = "BGN"
         else: cur = "EUR"
 
     # Issue date
@@ -87,20 +95,16 @@ def parse_rule_based(text: str) -> Dict[str, Any]:
         except Exception:
             vat_percent = 0.0
 
-    # Totals (best-effort)
-    # Try “Общо за плащане” or “Total”
+    # Grand total (best-effort)
     grand = None
     m = re.search(r"(Общо за плащане|Total)\D{0,10}([0-9][0-9\.\s,]*)", text, re.IGNORECASE)
     if m:
-        num = re.sub(r"[^\d,\.]", "", m.group(2))
-        num = num.replace(" ", "")
-        num = num.replace(",", ".")
+        num = re.sub(r"[^\d,\.]", "", m.group(2)).replace(" ", "").replace(",", ".")
         try:
             grand = float(num)
         except Exception:
             grand = None
 
-    # Build minimal result (no service lines by default)
     totals = {
         "subtotal": 0.0,
         "tax_total": 0.0,
@@ -109,7 +113,7 @@ def parse_rule_based(text: str) -> Dict[str, Any]:
     }
 
     return {
-        "supplier": {"name": ""},   # left empty for now
+        "supplier": {"name": ""},    # intentionally minimal for baseline
         "recipient": {"name": ""},
         "invoice_number": inv_no,
         "issue_date": found_date.isoformat(),
@@ -118,26 +122,28 @@ def parse_rule_based(text: str) -> Dict[str, Any]:
         "payment_terms": None,
         "po_number": None,
         "deal_id": None,
-        "service_lines": [],        # optional to fill later
+        "service_lines": [],
         "totals": totals,
         "extractor": "rule",
         "extraction_confidence": 0.35 if inv_no else 0.25,
     }
 
+# ---------------------------
+# Optional OpenAI parser
+# ---------------------------
 def parse_with_openai(text: str) -> Dict[str, Any]:
     """
-    Optional OpenAI-based parser. If OPENAI_API_KEY not set or library not present,
-    raises RuntimeError so caller can fallback to rule-based.
+    Uses OpenAI (if configured) to parse invoice into JSON.
+    If OPENAI_API_KEY not set or client not installed, raises RuntimeError.
     """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set")
 
     try:
-        # Lazy import to avoid hard dependency if not used
         from openai import OpenAI  # type: ignore
     except Exception as e:
-        raise RuntimeError("openai package not installed in this environment") from e
+        raise RuntimeError("openai package not installed") from e
 
     client = OpenAI(api_key=api_key)
 
@@ -152,7 +158,6 @@ def parse_with_openai(text: str) -> Dict[str, Any]:
     )
     user = "Extract an Invoice object from the text below. If unknown, omit or set sensible default.\n\nTEXT:\n" + text[:15000]
 
-    # Use Responses API with json_object format if available; otherwise basic chat with json guard.
     try:
         resp = client.responses.create(
             model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
@@ -161,7 +166,7 @@ def parse_with_openai(text: str) -> Dict[str, Any]:
             input=[{"role":"user","content":[{"type":"text","text":user}]}],
             response_format={"type":"json_object"},
         )
-        content = resp.output_text  # SDK provides parsed JSON text
+        content = resp.output_text  # JSON text
     except Exception as e:
         raise RuntimeError(f"OpenAI call failed: {e}")
 
@@ -176,6 +181,53 @@ def parse_with_openai(text: str) -> Dict[str, Any]:
         data["extraction_confidence"] = 0.7
     return data
 
+# ---------------------------
+# Fallback / Merge helpers
+# ---------------------------
+THRESH = float(os.getenv("AI_CONFIDENCE_THRESHOLD", "0.65"))
+
+def needs_fallback(payload: Dict[str, Any], threshold: float) -> bool:
+    """
+    Decide if we need rule-based fallback/merge:
+    - confidence below threshold
+    - missing invoice_number
+    - missing currency
+    - zero/empty grand_total
+    """
+    conf = float(payload.get("extraction_confidence") or 0.0)
+    cur = payload.get("currency")
+    totals = payload.get("totals", {}) or {}
+    missing_inv = not payload.get("invoice_number")
+    grand = float(totals.get("grand_total") or 0.0)
+    return (conf < threshold) or missing_inv or (not cur) or (grand <= 0.0)
+
+def merge_payloads(primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deep-ish merge:
+    - primary wins per field
+    - merge nested: supplier/recipient/totals
+    - if primary has no service_lines and secondary has → take secondary lines
+    - ensure currency consistency with totals
+    """
+    merged = {**secondary, **primary}
+
+    for k in ("supplier", "recipient", "totals"):
+        a = (secondary.get(k) or {}).copy()
+        b = (primary.get(k) or {}).copy()
+        merged[k] = {**a, **b}
+
+    if (not primary.get("service_lines")) and secondary.get("service_lines"):
+        merged["service_lines"] = secondary["service_lines"]
+
+    merged.setdefault("currency", (merged.get("totals", {}) or {}).get("currency", "EUR"))
+    if "totals" in merged:
+        merged["totals"].setdefault("currency", merged.get("currency", "EUR"))
+
+    return merged
+
+# ---------------------------
+# Endpoint
+# ---------------------------
 @router.post("/parse", response_model=Invoice)
 async def parse_invoice(file: UploadFile = File(...)):
     if file.content_type not in ("application/pdf", "application/octet-stream"):
@@ -191,30 +243,48 @@ async def parse_invoice(file: UploadFile = File(...)):
         if not text:
             raise HTTPException(422, "Could not extract text from PDF")
 
-        # Try AI first; on failure fallback to rules
-        payload: Dict[str, Any]
-        try:
-            payload = parse_with_openai(text)
-        except Exception:
-            payload = parse_rule_based(text)
+        # Always build a rule-based baseline
+        rule_payload: Dict[str, Any] = parse_rule_based(text)
 
-        # Ensure required blocks
+        # Try AI; if weak or missing, merge with baseline (hybrid)
+        try:
+            ai_payload: Dict[str, Any] = parse_with_openai(text)
+            payload: Dict[str, Any] = ai_payload
+            if needs_fallback(ai_payload, THRESH):
+                payload = merge_payloads(ai_payload, rule_payload)
+                payload["extractor"] = "hybrid"
+                payload["extraction_confidence"] = max(
+                    float(ai_payload.get("extraction_confidence") or 0.0), 0.55
+                )
+        except Exception:
+            # If AI call fails or not configured — use rule-based only
+            payload = rule_payload
+
+        # Ensure required blocks exist
         payload.setdefault("supplier", {"name": ""})
         payload.setdefault("recipient", {"name": ""})
         payload.setdefault("service_lines", [])
-        payload.setdefault("totals", {"subtotal": 0.0, "tax_total": 0.0, "grand_total": 0.0, "currency": payload.get("currency", "EUR")})
-        payload.setdefault("currency", payload.get("totals", {}).get("currency", "EUR"))
+        payload.setdefault("totals", {
+            "subtotal": 0.0, "tax_total": 0.0, "grand_total": 0.0,
+            "currency": payload.get("currency", "EUR")
+        })
+        payload.setdefault("currency", (payload.get("totals") or {}).get("currency", "EUR"))
         payload["source_file"] = file.filename
 
+        # Validate & adjust confidence
         model = Invoice(**payload)
         errs, warns = run_basic_validation(model)
         model.validation_errors = errs
         model.validation_warnings = warns
 
-        # If rule-based and we found some key fields, bump confidence a little
+        # If rule-only and some key fields found → small bump
         if payload.get("extractor") == "rule":
             filled = sum(1 for v in [model.invoice_number, model.issue_date, model.currency] if v)
             model.extraction_confidence = min(0.6, 0.25 + 0.15 * filled)
+
+        # If hybrid and no critical errors → boost a bit
+        if payload.get("extractor") == "hybrid" and not model.validation_errors:
+            model.extraction_confidence = min(0.85, max(model.extraction_confidence, 0.7))
 
         return model
 

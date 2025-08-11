@@ -6,17 +6,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from process import process_invoice_upload
-from suppliers_api import router as suppliers_router  # ← חדש
+from suppliers_api import router as suppliers_router
+from ai_endpoint import router as ai_router
 
 app = FastAPI(title="BulTrans API")
 
-# --- CORS (מה-ENV, עם ברירת מחדל מתאימה ל-Base44 + localhost) ---
+# --- CORS (ENV or defaults to Base44 + localhost) ---
 origins_env = os.getenv(
     "ALLOWED_ORIGINS",
     "https://preview--bul-trans-e5149297.base44.app,https://app--bul-trans-e5149297.base44.app,http://localhost:3000"
 )
 allow_origins = [o.strip() for o in origins_env.split(",") if o.strip()]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins or ["*"],
@@ -25,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- request_id לכל בקשה ---
+# --- request_id middleware ---
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     request.state.request_id = str(uuid.uuid4())
@@ -33,7 +33,7 @@ async def add_request_id(request: Request, call_next):
     response.headers["X-Request-ID"] = request.state.request_id
     return response
 
-# --- errors uniform ---
+# --- error handlers ---
 @app.exception_handler(HTTPException)
 async def http_exc_handler(request: Request, exc: HTTPException):
     return JSONResponse(
@@ -60,9 +60,11 @@ async def unhandled_exc_handler(request: Request, exc: Exception):
         },
     )
 
-# --- Routers ---
-app.include_router(suppliers_router)  # ← חדש
+# --- routers ---
+app.include_router(suppliers_router)
+app.include_router(ai_router)
 
+# --- existing endpoints ---
 @app.get("/ping")
 async def ping():
     return {"success": True, "message": "API is alive!"}

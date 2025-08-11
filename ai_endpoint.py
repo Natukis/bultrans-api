@@ -1,11 +1,12 @@
 # ai_endpoint.py
 import os
 import re
+import json
 import tempfile
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Body
 
 from ai_schema import Invoice, run_basic_validation
 
@@ -170,7 +171,6 @@ def parse_with_openai(text: str) -> Dict[str, Any]:
     except Exception as e:
         raise RuntimeError(f"OpenAI call failed: {e}")
 
-    import json
     try:
         data = json.loads(content)
     except Exception:
@@ -226,7 +226,7 @@ def merge_payloads(primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[s
     return merged
 
 # ---------------------------
-# Endpoint
+# Endpoints
 # ---------------------------
 @router.post("/parse", response_model=Invoice)
 async def parse_invoice(file: UploadFile = File(...)):
@@ -293,3 +293,35 @@ async def parse_invoice(file: UploadFile = File(...)):
             os.remove(tmp_path)
         except Exception:
             pass
+
+# ---------------------------
+# Feedback endpoint (save corrections)
+# ---------------------------
+FEEDBACK_DIR = os.getenv("FEEDBACK_DIR", "/app/data/feedback")
+os.makedirs(FEEDBACK_DIR, exist_ok=True)
+
+@router.post("/feedback")
+async def save_feedback(
+    payload: Dict[str, Any] = Body(..., description="Corrected Invoice JSON (schema-compatible)")
+):
+    """
+    שומר JSON מתוקן להפעלה עתידית/בדיקות/RAG.
+    קלט: כל האובייקט כפי שמחזיר /ai/parse, לאחר תיקונים ידניים בפרונט.
+    """
+    # sanity: must include source_file for traceability
+    src = payload.get("source_file") or "unknown"
+    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    safe_src = re.sub(r"[^A-Za-z0-9_.-]+", "_", src)
+    out = os.path.join(FEEDBACK_DIR, f"{ts}__{safe_src}.json")
+
+    # validate loosely (try to instantiate; don't fail hard)
+    try:
+        _ = Invoice(**payload)
+    except Exception:
+        # keep anyway; but mark invalid
+        payload.setdefault("_meta", {})["_invalid_schema"] = True
+
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    return {"success": True, "saved": os.path.basename(out)}

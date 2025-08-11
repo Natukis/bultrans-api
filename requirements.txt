@@ -17,3 +17,5 @@ google-api-python-client
 google-auth
 google-auth-httplib2
 google-auth-oauthlib
+openai>=1.37.0
+pdfminer.six>=20231228

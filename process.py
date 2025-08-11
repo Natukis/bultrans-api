@@ -17,6 +17,8 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from tempfile import NamedTemporaryFile
+from rates import rate_to_bgn
+
 
 # --- Configuration ---
 SUPPLIERS_PATH = os.getenv("SUPPLIERS_PATH", "suppliers.xlsx")
@@ -289,27 +291,44 @@ def upload_to_drive(local_path, filename):
     return link
 
 # --- Main API Endpoint ---
+@lru_cache(maxsize=512)
 def get_exchange_rate_for_date(date_obj, currency):
     """
-    מחזיר את שער ההמרה ל‑BGN עבור מטבע נתון בתאריך נתון, דרך exchangerate.host.
+    מחזיר שער המרה ל-BGN עם timeout קצר ו-fallback מהיר ±3 ימים + cache בזיכרון.
     """
-    if currency == "BGN":
+    c = (currency or "").upper()
+    if c == "BGN":
         log("Currency is already BGN — using 1.0")
         return 1.0
-    if currency == "EUR":
+    if c == "EUR":
         log("Using fixed EUR→BGN rate: 1.95583")
         return 1.95583
 
-    url = f"https://api.exchangerate.host/{date_obj.strftime('%Y-%m-%d')}?base={currency}&symbols=BGN"
-    log(f"Fetching exchange rate for {currency}→BGN on {date_obj.strftime('%Y-%m-%d')}")
-    resp = requests.get(url, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    if "rates" in data and "BGN" in data["rates"]:
-        rate = float(data["rates"]["BGN"])
-        log(f"Rate for {currency}→BGN on {date_obj.strftime('%Y-%m-%d')}: {rate}")
-        return rate
-    raise ValueError(f"Could not fetch rate for {currency}→BGN on {date_obj.strftime('%Y-%m-%d')}")
+    TIMEOUT_SEC = 3
+    MAX_FALLBACK_DAYS = 3
+
+    # מנסים תאריך מדויק ואז ±1..±3 ימים (סה״כ עד 7 ניסיונות מהירים)
+    for delta in range(0, MAX_FALLBACK_DAYS + 1):
+        candidates = [date_obj] if delta == 0 else [date_obj - datetime.timedelta(days=delta),
+                                                    date_obj + datetime.timedelta(days=delta)]
+        for d in candidates:
+            url = f"https://api.exchangerate.host/{d.strftime('%Y-%m-%d')}?base={c}&symbols=BGN"
+            try:
+                log(f"Fetching exchange rate for {c}→BGN on {d.strftime('%Y-%m-%d')}")
+                resp = requests.get(url, timeout=TIMEOUT_SEC)
+                resp.raise_for_status()
+                data = resp.json()
+                rate = data.get("rates", {}).get("BGN")
+                if rate is not None:
+                    rate = float(rate)
+                    log(f"Rate for {c}→BGN on {d.strftime('%Y-%m-%d')}: {rate}")
+                    return rate
+            except Exception as e:
+                # ממשיכים למועמד הבא ללא הפלת התהליך
+                continue
+
+    raise ValueError(f"Could not fetch rate for {c}→BGN near {date_obj.strftime('%Y-%m-%d')} (±{MAX_FALLBACK_DAYS}d)")
+
 
 @router.post("/process-invoice/")
 async def process_invoice_upload(supplier_id: str, file: UploadFile):
@@ -368,7 +387,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         for idx, item in enumerate(service_items[:5], start=1):
             row_context[f"RN{idx}"] = idx
             row_context[f"ServiceDescription{idx}"] = item['description']
-            row_context[f"Cur{idx}"] = "EUR"
+            row_context[f"Cur{idx}"] = (item.get("currency") or currency or "EUR").upper()
             row_context[f"Amount{idx}"] = f"{item['line_total']:.2f}"
             row_context[f"UnitPrice{idx}"] = f"{exchange_rate:.5f}"
             row_context[f"LineTotal{idx}"] = format_bgn(round(item['line_total'] * exchange_rate, 2))

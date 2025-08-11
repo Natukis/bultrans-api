@@ -18,6 +18,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from tempfile import NamedTemporaryFile
 from rates import rate_to_bgn
+import subprocess, shlex, os
+from pathlib import Path
 
 
 # --- Configuration ---
@@ -289,6 +291,23 @@ def upload_to_drive(local_path, filename):
     link = file.get("webViewLink")
     log(f"Successfully uploaded. Link: {link}")
     return link
+def docx_to_pdf(docx_path: str) -> str:
+    """
+    ממיר DOCX ל-PDF באמצעות LibreOffice headless.
+    מחזיר את הנתיב המקומי ל-PDF שנוצר.
+    """
+    docx_path = os.path.abspath(docx_path)
+    out_dir = os.path.dirname(docx_path)
+    cmd = f"soffice --headless --convert-to pdf --outdir {shlex.quote(out_dir)} {shlex.quote(docx_path)}"
+    try:
+        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"PDF conversion failed: {e.stderr.decode(errors='ignore')[:400]}")
+
+    pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
+    if not os.path.exists(pdf_path):
+        raise RuntimeError("PDF conversion did not produce an output file")
+    return pdf_path
 
 # --- Main API Endpoint ---
 @lru_cache(maxsize=512)
@@ -429,12 +448,26 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         df.loc[df["SupplierCompanyID"] == str(supplier_id), "Last invoice number"] = int(invoice_number)
         df.to_excel(SUPPLIERS_PATH, index=False)
         drive_link = upload_to_drive(output_path, output_filename)
-        
+        # --- המרת DOCX ל-PDF והעלאה ל-Drive ---
+        pdf_link = None
+        try:
+            pdf_path = docx_to_pdf(output_path)
+            pdf_filename = os.path.splitext(output_filename)[0] + ".pdf"
+            pdf_link = upload_to_drive(pdf_path, pdf_filename)
+            log(f"PDF '{pdf_filename}' uploaded. Link: {pdf_link}")
+        except Exception as e:
+            log(f"PDF export failed: {e}")
+
         return JSONResponse({
-            "success": True, 
-            "data": {"invoice_number": invoice_number, "drive_link": drive_link}, 
+            "success": True,
+            "data": {
+                "invoice_number": invoice_number,
+                "docx_link": drive_link,
+                "pdf_link": pdf_link
+            },
             "errors": processing_errors
         })
+
 
     except Exception as e:
         log(f"❌ GLOBAL EXCEPTION: {traceback.format_exc()}")
@@ -442,3 +475,5 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
     finally:
         if 'file_path' in locals() and os.path.exists(file_path): os.remove(file_path)
         if 'output_path' in locals() and os.path.exists(output_path): os.remove(output_path)
+        if 'pdf_path' in locals() and os.path.exists(pdf_path): os.remove(pdf_path)
+

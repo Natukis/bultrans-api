@@ -1,3 +1,4 @@
+import os, json
 import os
 import re
 import datetime
@@ -24,6 +25,22 @@ from pathlib import Path
 
 # --- Configuration ---
 SUPPLIERS_PATH = os.getenv("SUPPLIERS_PATH", "suppliers.xlsx")
+SUPPLIERS_DIR = os.getenv("SUPPLIERS_DIR", "/app/data/suppliers")
+POINTER_FILE = os.path.join(SUPPLIERS_DIR, "current.json")
+os.makedirs(SUPPLIERS_DIR, exist_ok=True)
+
+def get_suppliers_current_path():
+    try:
+        if os.path.exists(POINTER_FILE):
+            with open(POINTER_FILE, "r", encoding="utf-8") as f:
+                p = json.load(f).get("current")
+                if p and os.path.exists(p):
+                    return p
+    except Exception:
+        pass
+    # fallback: הנתיב הקיים בקוד שלך
+    return SUPPLIERS_PATH
+
 TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "templates")
 DEFAULT_CURRENCY = os.getenv("DEFAULT_CURRENCY", "EUR")
 DEFAULT_VAT_PERCENT = float(os.getenv("DEFAULT_VAT_PERCENT", "20.0"))
@@ -358,7 +375,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         text = extract_text_from_file(file_path, file.filename)
         if not text: raise HTTPException(status_code=400, detail="Could not extract text from file.")
 
-        df = pd.read_excel(SUPPLIERS_PATH, dtype={'SupplierCompanyID': str})
+        df = pd.read_excel(get_suppliers_current_path())
         supplier_row = df[df["SupplierCompanyID"] == str(supplier_id)]
         if supplier_row.empty: raise HTTPException(status_code=404, detail=f"Supplier with ID '{supplier_id}' not found.")
         supplier_data = supplier_row.iloc[0]
@@ -446,7 +463,7 @@ async def process_invoice_upload(supplier_id: str, file: UploadFile):
         log(f"Invoice '{output_filename}' created locally.")
         
         df.loc[df["SupplierCompanyID"] == str(supplier_id), "Last invoice number"] = int(invoice_number)
-        df.to_excel(SUPPLIERS_PATH, index=False)
+        df.to_excel(get_suppliers_current_path(), index=False)
         drive_link = upload_to_drive(output_path, output_filename)
         # --- המרת DOCX ל-PDF והעלאה ל-Drive ---
         pdf_link = None
